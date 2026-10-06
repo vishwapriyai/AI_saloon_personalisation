@@ -30,7 +30,7 @@ export const GeneratePage: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center py-12">
-      <div className="w-full max-w-lg bg-slate-800/80 border border-slate-700/60 rounded-3xl p-8 shadow-2xl text-center backdrop-blur-xl space-y-6">
+      <div className="w-full bg-slate-800/80 border border-slate-700/60 rounded-3xl p-8 shadow-2xl text-center backdrop-blur-xl space-y-6">
         <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
           <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-amber-500 to-amber-300 animate-spin opacity-30 blur-md"></div>
           <div className="w-20 h-20 rounded-full bg-slate-900 border-2 border-amber-500/50 flex items-center justify-center text-amber-400 relative z-10 shadow-lg">

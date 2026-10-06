@@ -1,17 +1,26 @@
 import React, { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, Users, Scissors, BarChart3, Tag, Award, Settings, Menu, X, LogOut, ChevronRight
+  LayoutDashboard, Users, Scissors, BarChart3, Tag, Award, Settings, Menu, X, LogOut, ChevronRight, UserSearch
 } from 'lucide-react';
+import { clearSession, getSession } from '../auth/session';
 
 export const AdminLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const session = getSession();
+  const initials = (session?.name || 'Admin').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+
+  const logout = () => {
+    clearSession();
+    navigate('/staff/login', { replace: true });
+  };
 
   const menuItems = [
     { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
     { label: 'Customers', path: '/admin/customers', icon: Users },
+    { label: 'Serve a Customer', path: '/stylist/customers', icon: UserSearch },
     { label: 'Hairstyles Catalogue', path: '/admin/styles', icon: Scissors },
     { label: 'Capacity Analytics', path: '/admin/analytics/capacity', icon: BarChart3 },
     { label: 'Campaigns & Coupons', path: '/admin/campaigns', icon: Tag },
@@ -32,8 +41,9 @@ export const AdminLayout: React.FC = () => {
           </button>
           <span className="font-bold text-amber-400">SALON AI ADMIN</span>
         </div>
-        <button onClick={() => navigate('/customer/login')} className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300">
-          Customer Portal
+        <button onClick={logout} className="text-xs px-3 py-2 rounded-lg bg-slate-800 hover:bg-rose-500/15 text-slate-300 hover:text-rose-300 flex items-center gap-1.5" aria-label="Log out">
+          <LogOut className="w-4 h-4" />
+          <span>Logout</span>
         </button>
       </header>
 
@@ -88,15 +98,16 @@ export const AdminLayout: React.FC = () => {
         <div className="p-4 border-t border-slate-800 flex items-center justify-between bg-slate-900/50">
           <div className="flex items-center space-x-3">
             <div className="w-9 h-9 rounded-full bg-slate-700 flex items-center justify-center font-bold text-amber-400 text-sm">
-              SA
+              {initials}
             </div>
             <div>
-              <p className="text-xs font-semibold text-white">Salon Manager</p>
-              <p className="text-[10px] text-slate-400">admin@luxe-salon.ai</p>
+              <p className="text-xs font-semibold text-white">{session?.name || 'Salon Admin'}</p>
+              <p className="text-[10px] text-slate-400">{session?.role}</p>
             </div>
           </div>
-          <button onClick={() => navigate('/customer/login')} className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800">
+          <button onClick={logout} className="px-2.5 py-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 flex items-center gap-1.5 text-xs font-semibold" aria-label="Log out">
             <LogOut className="w-4 h-4" />
+            <span>Logout</span>
           </button>
         </div>
       </aside>

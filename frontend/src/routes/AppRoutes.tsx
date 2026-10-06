@@ -7,7 +7,7 @@ import { AdminLayout } from '../layouts/AdminLayout';
 import { StylistLayout } from '../layouts/StylistLayout';
 
 // Customer Pages
-import { LoginLookupPage } from '../pages/customer/LoginLookupPage';
+import { CustomerLoginPage } from '../pages/customer/CustomerLoginPage';
 import { PhotoUploadPage } from '../pages/customer/PhotoUploadPage';
 import { ServiceCategoryPage } from '../pages/customer/ServiceCategoryPage';
 import { GeneratePage } from '../pages/customer/GeneratePage';
@@ -26,6 +26,11 @@ import { CampaignsPage } from '../pages/admin/CampaignsPage';
 // Public Pages
 import { SharedReferralPage } from '../pages/public/SharedReferralPage';
 
+// Staff Pages & route guard
+import { StaffLoginPage } from '../pages/staff/StaffLoginPage';
+import { StaffCustomersPage } from '../pages/staff/StaffCustomersPage';
+import { RequireAuth } from '../auth/RequireAuth';
+
 // Stylist Pages
 import { StylistDashboardPage } from '../pages/stylist/StylistDashboardPage';
 
@@ -38,10 +43,16 @@ export const AppRoutes: React.FC = () => {
       {/* Public share link opened from WhatsApp / SMS */}
       <Route path="/r/:code" element={<SharedReferralPage />} />
 
+      {/* Separate login pages: customers and salon staff (stylist / admin) */}
+      <Route path="/staff/login" element={<StaffLoginPage />} />
+      <Route path="/staff" element={<Navigate to="/staff/login" replace />} />
+
       {/* CUSTOMER APPLICATION ROUTES */}
       <Route path="/customer" element={<CustomerLayout />}>
         <Route index element={<Navigate to="/customer/login" replace />} />
-        <Route path="login" element={<LoginLookupPage />} />
+        <Route path="login" element={<CustomerLoginPage />} />
+        {/* Everything else needs a logged-in customer, or staff serving a selected customer */}
+        <Route element={<RequireAuth need="customer-area" />}>
         <Route path="photo" element={<PhotoUploadPage />} />
         <Route path="service" element={<ServiceCategoryPage />} />
         <Route path="style-category" element={<ServiceCategoryPage />} />
@@ -52,9 +63,11 @@ export const AppRoutes: React.FC = () => {
         <Route path="confirmation" element={<BeforeAfterConfirmationPage />} />
         <Route path="history" element={<CustomerHistoryPage />} />
         <Route path="profile" element={<CustomerProfilePage />} />
+        </Route>
       </Route>
 
       {/* ADMIN APPLICATION ROUTES */}
+      <Route element={<RequireAuth need="admin" />}>
       <Route path="/admin" element={<AdminLayout />}>
         <Route index element={<Navigate to="/admin/dashboard" replace />} />
         <Route path="dashboard" element={<AdminDashboardPage />} />
@@ -72,15 +85,18 @@ export const AppRoutes: React.FC = () => {
         <Route path="loyalty" element={<CustomerProfilePage />} />
         <Route path="settings" element={<AdminDashboardPage />} />
       </Route>
+      </Route>
 
       {/* STYLIST APPLICATION ROUTES */}
+      <Route element={<RequireAuth need="staff" />}>
       <Route path="/stylist" element={<StylistLayout />}>
-        <Route index element={<StylistDashboardPage />} />
-        <Route path="customers" element={<StylistDashboardPage />} />
+        <Route index element={<Navigate to="/stylist/customers" replace />} />
+        <Route path="customers" element={<StaffCustomersPage />} />
         <Route path="appointments" element={<StylistDashboardPage />} />
         <Route path="style/:id" element={<CuttingInstructionsPage />} />
         <Route path="instructions" element={<CuttingInstructionsPage />} />
         <Route path="service-completion" element={<BeforeAfterConfirmationPage />} />
+      </Route>
       </Route>
 
       {/* Fallback */}

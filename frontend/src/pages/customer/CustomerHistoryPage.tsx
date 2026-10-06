@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Share2, Award, Copy, Check } from 'lucide-react';
 import { getCustomerHistory, getShareLink, PUBLIC_APP_URL } from '../../api/client';
+import { currentCustomerId } from '../../auth/session';
 
 export const CustomerHistoryPage: React.FC = () => {
   const [history, setHistory] = useState<any>(null);
@@ -8,7 +9,7 @@ export const CustomerHistoryPage: React.FC = () => {
   const [share, setShare] = useState<{ referral_code: string; share_path: string; discount_percent: number; salon_name: string } | null>(null);
 
   useEffect(() => {
-    const customerId = Number(localStorage.getItem('salon_customer_id') || 1);
+    const customerId = currentCustomerId();
     getCustomerHistory(customerId)
       .then((res) => setHistory(res))
       .catch((err) => console.error(err));
@@ -75,7 +76,7 @@ export const CustomerHistoryPage: React.FC = () => {
       </div>
 
       {/* Style History Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         <div className="bg-slate-800/60 border border-slate-700/60 p-5 rounded-3xl space-y-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Latest Selected Style</span>

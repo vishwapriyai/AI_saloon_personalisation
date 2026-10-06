@@ -45,6 +45,13 @@ def add_missing_columns() -> None:
 
 add_missing_columns()
 
+# Staff roles, sample staff accounts and sample customer passwords (only where missing)
+from app.core.auth import seed_auth  # noqa: E402
+from app.core.database import SessionLocal  # noqa: E402
+
+with SessionLocal() as _db:
+    seed_auth(_db)
+
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

@@ -6,10 +6,12 @@ import uuid
 
 from app.core.database import get_db
 from app.core.security import create_access_token, get_password_hash, verify_password
+from app.core.auth import Principal, get_current_principal, require_staff, ensure_customer_access
 from app.core.storage import storage_service
 from app.models.domain import (
     Customer, CustomerPhoto, StyleRecommendation, StyleGeneration, StyleSelection,
-    HaircutInstruction, CustomerVisit, ServiceHistory, Hairstyle, Coupon, LoyaltyAccount, Membership, Referral
+    HaircutInstruction, CustomerVisit, ServiceHistory, Hairstyle, Coupon, LoyaltyAccount, Membership, Referral,
+    User, Role, MembershipTransaction
 )
 from app.core.config import settings
 import secrets
@@ -39,16 +41,79 @@ router = APIRouter()
 # 1. Auth & Customer Lookup Flow
 # -------------------------------------------------------------
 @router.post("/auth/login", response_model=Token)
-def login_user(username: str = Form(...), password: str = Form(...)):
-    # Demo authentication logic
-    if password in ["admin123", "stylist123", "customer123"]:
-        role = "Super Admin" if "admin" in username else ("Stylist" if "stylist" in username else "Customer")
-        token = create_access_token({"sub": username, "role": role})
-        return Token(access_token=token, role=role, user_id=1, full_name=username.title())
-    raise HTTPException(status_code=400, detail="Invalid username or password")
+def login_user(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+    """Staff login (stylist / admin) with a username and password from the users table."""
+    user = db.query(User).filter(User.username == username.strip().lower()).first()
+    if not user or not user.is_active or not verify_password(password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+    role = db.query(Role).filter(Role.id == user.role_id).first()
+    role_name = role.name if role else "Stylist"
+    token = create_access_token({"sub": f"staff:{user.id}", "role": role_name, "name": user.full_name})
+    return Token(access_token=token, role=role_name, user_id=user.id, full_name=user.full_name)
+
+
+class CustomerLoginRequest(BaseModel):
+    identifier: str          # mobile number or customer ID (CUST-xxxx)
+    password: str
+
+
+class CustomerRegisterRequest(BaseModel):
+    full_name: str
+    phone_number: str
+    password: str
+    gender: Optional[str] = None
+    referral_code: Optional[str] = None
+
+
+def _customer_session(db: Session, customer: Customer) -> dict:
+    token = create_access_token({"sub": f"customer:{customer.id}", "role": "Customer", "name": customer.full_name})
+    return {"access_token": token, "token_type": "bearer", "role": "Customer", **_customer_summary(db, customer)}
+
+
+@router.post("/auth/customer/login")
+def customer_login(payload: CustomerLoginRequest, db: Session = Depends(get_db)):
+    """Customer login with mobile number (or customer ID) and password."""
+    ident = payload.identifier.strip()
+    if ident.upper().startswith("CUST-"):
+        candidates = db.query(Customer).filter(Customer.customer_code == ident.upper()).all()
+    else:
+        digits = re.sub(r"\D", "", ident)
+        digits = digits[-10:] if len(digits) > 10 else digits
+        candidates = db.query(Customer).filter(Customer.phone_number == digits).all() if digits else []
+    matches = [c for c in candidates if verify_password(payload.password, c.password_hash)]
+    if not matches:
+        raise HTTPException(status_code=401, detail="Incorrect mobile number / customer ID or password")
+    if len(matches) > 1:
+        raise HTTPException(status_code=409, detail="More than one profile uses this mobile number. "
+                                                    "Please log in with your customer ID (e.g. CUST-1001).")
+    return _customer_session(db, matches[0])
+
+
+@router.post("/auth/customer/register")
+def customer_register(payload: CustomerRegisterRequest, db: Session = Depends(get_db)):
+    """New customer sign-up: creates the profile with a password and logs the customer in."""
+    phone = re.sub(r"\D", "", payload.phone_number)
+    phone = phone[-10:] if len(phone) > 10 else phone
+    if len(phone) != 10:
+        raise HTTPException(status_code=422, detail="Please enter a 10-digit mobile number.")
+    if len(payload.password) < 6:
+        raise HTTPException(status_code=422, detail="Password must be at least 6 characters.")
+    if not payload.full_name.strip():
+        raise HTTPException(status_code=422, detail="Please enter your name.")
+    if db.query(Customer).filter(Customer.phone_number == phone).first():
+        raise HTTPException(status_code=409, detail="This mobile number is already registered. Please log in.")
+    customer = _create_customer(db, CustomerCreate(full_name=payload.full_name.strip(), phone_number=phone,
+                                                    gender=payload.gender, referral_code=payload.referral_code),
+                                password=payload.password)
+    return _customer_session(db, customer)
+
+
+@router.get("/auth/me")
+def who_am_i(principal: Principal = Depends(get_current_principal)):
+    return {"kind": principal.kind, "id": principal.id, "role": principal.role, "name": principal.name}
 
 @router.get("/customers")
-def get_customers_list(query: Optional[str] = None, db: Session = Depends(get_db)):
+def get_customers_list(query: Optional[str] = None, db: Session = Depends(get_db), principal: Principal = Depends(require_staff)):
     """
     Staff customer directory (salon / stylist / admin). Phone numbers are never returned here; staff can still
     find a customer by typing their mobile number, and matches by phone are flagged as `matched_by_phone`.
@@ -118,19 +183,70 @@ def _last_preferences(db: Session, customer: Customer) -> Optional[dict]:
 
 
 @router.get("/customers/{customer_id}/last-preferences")
-def get_last_preferences(customer_id: int, db: Session = Depends(get_db)):
+def get_last_preferences(customer_id: int, db: Session = Depends(get_db), principal: Principal = Depends(get_current_principal)):
+    ensure_customer_access(principal, customer_id)
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     return {"customer_id": customer.id, "last_preferences": _last_preferences(db, customer)}
 
 
+@router.get("/customers/{customer_id}/summary")
+def get_customer_summary(customer_id: int, db: Session = Depends(get_db),
+                         principal: Principal = Depends(get_current_principal)):
+    """Latest returning-customer details (incl. the most recently chosen style) for the welcome screen."""
+    ensure_customer_access(principal, customer_id)
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return _customer_summary(db, customer)
+
+
+@router.get("/customers/{customer_id}/profile")
+def get_customer_profile(customer_id: int, db: Session = Depends(get_db),
+                         principal: Principal = Depends(get_current_principal)):
+    """The customer's own profile card: ID, segment, visits, spend, loyalty points and active membership."""
+    ensure_customer_access(principal, customer_id)
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    loyalty = db.query(LoyaltyAccount).filter(LoyaltyAccount.customer_id == customer_id).first()
+    membership = None
+    tx = (db.query(MembershipTransaction)
+          .filter(MembershipTransaction.customer_id == customer_id, MembershipTransaction.status == "ACTIVE")
+          .order_by(MembershipTransaction.end_date.desc()).first())
+    if tx and (tx.end_date is None or tx.end_date >= datetime.utcnow()):
+        plan = db.query(Membership).filter(Membership.id == tx.membership_id).first()
+        membership = {
+            "name": plan.name if plan else "Member",
+            "valid_until": tx.end_date.date().isoformat() if tx.end_date else None,
+            "discount_percentage": plan.discount_percentage if plan else None,
+        }
+    return {
+        "id": customer.id,
+        "customer_code": customer.customer_code,
+        "full_name": customer.full_name,
+        "gender": customer.gender,
+        "segment_name": customer.segment_name,
+        "total_visits": customer.total_visits or 0,
+        "total_spent": customer.total_spent or 0.0,
+        "last_visit_date": customer.last_visit_date.date().isoformat() if customer.last_visit_date else None,
+        "member_since": customer.created_at.date().isoformat() if customer.created_at else None,
+        "loyalty_points": loyalty.points_balance if loyalty else 0,
+        "membership": membership,
+    }
+
+
 @router.get("/customers/lookup/{phone_number}")
-def lookup_customer(phone_number: str, db: Session = Depends(get_db)):
+def lookup_customer(phone_number: str, db: Session = Depends(get_db), principal: Principal = Depends(require_staff)):
     customer = db.query(Customer).filter(Customer.phone_number == phone_number).first()
     if not customer:
         return {"found": False, "message": "New customer"}
+    return _customer_summary(db, customer)
 
+
+def _customer_summary(db: Session, customer: Customer) -> dict:
+    """Profile, previous style and last choices for the returning-customer screen."""
     # Retrieve last visit & style selection history for returning customer flow
     last_selection = db.query(StyleSelection).filter(StyleSelection.customer_id == customer.id).order_by(StyleSelection.id.desc()).first()
     hairstyle_name = None
@@ -164,11 +280,16 @@ def lookup_customer(phone_number: str, db: Session = Depends(get_db)):
 
 
 @router.post("/customers", response_model=CustomerResponse)
-def create_customer(payload: CustomerCreate, db: Session = Depends(get_db)):
+def create_customer(payload: CustomerCreate, db: Session = Depends(get_db), principal: Principal = Depends(require_staff)):
+    """Staff add a walk-in customer (they get the sample password and can change it later)."""
     existing = db.query(Customer).filter(Customer.phone_number == payload.phone_number).first()
     if existing:
         return existing
+    from app.core.auth import SAMPLE_CUSTOMER_PASSWORD
+    return _create_customer(db, payload, password=SAMPLE_CUSTOMER_PASSWORD)
 
+
+def _create_customer(db: Session, payload: CustomerCreate, password: str) -> Customer:
     code = f"CUST-{uuid.uuid4().hex[:6].upper()}"
     referrer_link = None
     if payload.referral_code:
@@ -180,7 +301,8 @@ def create_customer(payload: CustomerCreate, db: Session = Depends(get_db)):
         phone_number=payload.phone_number,
         email=payload.email,
         gender=payload.gender,
-        segment_name="Regular Customer"
+        segment_name="Regular Customer",
+        password_hash=get_password_hash(password),
     )
     db.add(new_cust)
     db.commit()
@@ -206,11 +328,12 @@ class ShareLinkRequest(BaseModel):
 
 
 @router.post("/referrals/share-link")
-def get_share_link(payload: ShareLinkRequest, db: Session = Depends(get_db)):
+def get_share_link(payload: ShareLinkRequest, db: Session = Depends(get_db), principal: Principal = Depends(get_current_principal)):
     """
     Returns the customer's personal share code, creating it once. Codes are random (not the customer ID)
     so nobody can guess other customers' links and see their hairstyle photos.
     """
+    ensure_customer_access(principal, payload.customer_id)
     customer = db.query(Customer).filter(Customer.id == payload.customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -256,10 +379,12 @@ def get_shared_referral(referral_code: str, db: Session = Depends(get_db)):
 @router.post("/customers/{customer_id}/photo", response_model=PhotoUploadResponse)
 async def upload_customer_photo(
     customer_id: int,
+    principal: Principal = Depends(get_current_principal),
     file: UploadFile = File(...),
     back_file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
+    ensure_customer_access(principal, customer_id)
     # Store every photo as a standard JPEG (phones may send HEIC/AVIF that browsers cannot display)
     try:
         contents = normalize_photo(await file.read())
@@ -308,8 +433,11 @@ async def upload_customer_photo(
 # 3. Controlled Hairstyle Recommendations
 # -------------------------------------------------------------
 @router.post("/style-recommendations", response_model=RecommendationResponse)
-def get_style_recommendations(payload: RecommendationRequest, db: Session = Depends(get_db)):
+def get_style_recommendations(payload: RecommendationRequest, db: Session = Depends(get_db), principal: Principal = Depends(get_current_principal)):
+    ensure_customer_access(principal, payload.customer_id)
     photo = db.query(CustomerPhoto).filter(CustomerPhoto.id == payload.photo_id).first()
+    if photo and photo.customer_id != payload.customer_id:
+        raise HTTPException(status_code=403, detail="This photo belongs to a different customer.")
     customer = db.query(Customer).filter(Customer.id == payload.customer_id).first()
     
     face_shape = photo.face_shape if photo else "Oval"
@@ -378,7 +506,7 @@ def get_style_recommendations(payload: RecommendationRequest, db: Session = Depe
 # 4. Asynchronous AI Generation Job Orchestration
 # -------------------------------------------------------------
 @router.post("/style-generations", response_model=GenerationJobResponse)
-async def generate_personalized_images(payload: GenerationRequest, db: Session = Depends(get_db)):
+async def generate_personalized_images(payload: GenerationRequest, db: Session = Depends(get_db), principal: Principal = Depends(get_current_principal)):
     job_id = f"JOB-{uuid.uuid4().hex[:8].upper()}"
 
     print(f"\n\033[95m\033[1m========================================================================\033[0m", flush=True)
@@ -388,7 +516,10 @@ async def generate_personalized_images(payload: GenerationRequest, db: Session =
     print(f"\033[95m\033[1m========================================================================\033[0m\n", flush=True)
 
     rec = db.query(StyleRecommendation).filter(StyleRecommendation.id == payload.recommendation_id).first()
-    photo = db.query(CustomerPhoto).filter(CustomerPhoto.id == rec.photo_id).first() if rec else None
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recommendation not found")
+    ensure_customer_access(principal, rec.customer_id)
+    photo = db.query(CustomerPhoto).filter(CustomerPhoto.id == rec.photo_id).first()
     if not photo:
         raise HTTPException(status_code=404, detail="Customer photo not found for this recommendation")
 
@@ -463,7 +594,8 @@ async def generate_personalized_images(payload: GenerationRequest, db: Session =
 async def generate_high_fidelity_selection(
     recommendation_id: int,
     style_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(get_current_principal)
 ):
     """
     Regenerates the chosen style with the high-quality model and saves it as the customer's reference image.
@@ -471,6 +603,7 @@ async def generate_high_fidelity_selection(
     rec = db.query(StyleRecommendation).filter(StyleRecommendation.id == recommendation_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Recommendation not found")
+    ensure_customer_access(principal, rec.customer_id)
 
     photo = db.query(CustomerPhoto).filter(CustomerPhoto.id == rec.photo_id).first()
     if not photo:
@@ -509,13 +642,15 @@ async def generate_high_fidelity_selection(
     }
 
 @router.get("/style-generations/status/{job_id}", response_model=GenerationJobResponse)
-def get_generation_job_status(job_id: str, db: Session = Depends(get_db)):
+def get_generation_job_status(job_id: str, db: Session = Depends(get_db), principal: Principal = Depends(get_current_principal)):
     """
     Polling fallback endpoint for retrieving generation state if WebSocket/SSE connection drops.
     """
     records = db.query(StyleGeneration).filter(StyleGeneration.job_id == job_id).all()
     if not records:
         raise HTTPException(status_code=404, detail=f"Generation job {job_id} not found")
+    job_rec = db.query(StyleRecommendation).filter(StyleRecommendation.id == records[0].recommendation_id).first()
+    ensure_customer_access(principal, job_rec.customer_id if job_rec else None)
 
     items = []
     for r in records:
@@ -544,7 +679,8 @@ def get_generation_job_status(job_id: str, db: Session = Depends(get_db)):
 # 5. Customer Selection & Haircut Instructions
 # -------------------------------------------------------------
 @router.post("/style-selections", response_model=SelectionResponse)
-def select_style_and_get_instructions(payload: SelectionRequest, db: Session = Depends(get_db)):
+def select_style_and_get_instructions(payload: SelectionRequest, db: Session = Depends(get_db), principal: Principal = Depends(get_current_principal)):
+    ensure_customer_access(principal, payload.customer_id)
     hairstyle = get_style(payload.hairstyle_id)
     if not hairstyle:
         raise HTTPException(status_code=404, detail=f"Unknown style id: {payload.hairstyle_id}")
@@ -580,7 +716,8 @@ def select_style_and_get_instructions(payload: SelectionRequest, db: Session = D
     )
 
 @router.get("/customer-history/{customer_id}")
-def get_customer_history(customer_id: int, db: Session = Depends(get_db)):
+def get_customer_history(customer_id: int, db: Session = Depends(get_db), principal: Principal = Depends(get_current_principal)):
+    ensure_customer_access(principal, customer_id)
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     selections = db.query(StyleSelection).filter(StyleSelection.customer_id == customer_id).order_by(StyleSelection.id.desc()).all()
     visits = db.query(CustomerVisit).filter(CustomerVisit.customer_id == customer_id).all()
@@ -612,7 +749,7 @@ def get_customer_history(customer_id: int, db: Session = Depends(get_db)):
 # 6. Service Completion & Confirmation
 # -------------------------------------------------------------
 @router.post("/service-completion")
-def complete_service_confirmation(payload: ServiceCompletionRequest, db: Session = Depends(get_db)):
+def complete_service_confirmation(payload: ServiceCompletionRequest, db: Session = Depends(get_db), principal: Principal = Depends(get_current_principal)):
     visit = db.query(CustomerVisit).filter(CustomerVisit.id == payload.visit_id).first()
     if visit:
         visit.status = "COMPLETED"
@@ -623,7 +760,7 @@ def complete_service_confirmation(payload: ServiceCompletionRequest, db: Session
 # 7. Admin Analytics & Capacity Endpoints
 # -------------------------------------------------------------
 @router.get("/analytics/overview", response_model=DashboardOverview)
-def get_dashboard_overview(db: Session = Depends(get_db)):
+def get_dashboard_overview(db: Session = Depends(get_db), principal: Principal = Depends(require_staff)):
     total_cust = db.query(Customer).count() or 148
     return DashboardOverview(
         total_customers=total_cust,
@@ -635,7 +772,7 @@ def get_dashboard_overview(db: Session = Depends(get_db)):
     )
 
 @router.get("/analytics/capacity")
-def get_capacity_analytics():
+def get_capacity_analytics(principal: Principal = Depends(require_staff)):
     return {
         "heatmap": capacity_engine.get_traffic_heatmap(),
         "peak_hours": ["4:00 PM - 5:00 PM", "5:00 PM - 6:00 PM", "6:00 PM - 7:00 PM"],
@@ -644,7 +781,7 @@ def get_capacity_analytics():
     }
 
 @router.post("/analytics/recommend-offer", response_model=OfferRecommendationResponse)
-def get_offer_recommendation(payload: OfferRecommendationRequest, db: Session = Depends(get_db)):
+def get_offer_recommendation(payload: OfferRecommendationRequest, db: Session = Depends(get_db), principal: Principal = Depends(require_staff)):
     customer = db.query(Customer).filter(Customer.id == payload.customer_id).first()
     segment = customer.segment_name if customer else "Rare / At-Risk Customer"
 

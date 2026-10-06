@@ -34,7 +34,7 @@ export const SharedReferralPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-4 py-8">
-      <div className="w-full max-w-md bg-slate-900/80 border border-slate-700/60 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 text-center">
+      <div className="w-full max-w-3xl bg-slate-900/80 border border-slate-700/60 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 text-center">
         <div className="flex items-center justify-center gap-3">
           <div className="w-11 h-11 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center">
             <Scissors className="w-6 h-6" />

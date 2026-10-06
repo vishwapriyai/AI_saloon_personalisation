@@ -31,7 +31,7 @@ export const BeforeAfterConfirmationPage: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center py-4 sm:py-6 space-y-6">
-      <div className="w-full max-w-2xl bg-slate-800/80 border border-slate-700/60 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl space-y-6">
+      <div className="w-full bg-slate-800/80 border border-slate-700/60 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl space-y-6">
         <div className="text-center">
           <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto mb-3">
             <CheckCircle2 className="w-8 h-8" />

@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Camera, RefreshCw, ArrowRight } from 'lucide-react';
 import { uploadCustomerPhoto } from '../../api/client';
+import { currentCustomerId } from '../../auth/session';
 
 
 export const PhotoUploadPage: React.FC = () => {
@@ -31,7 +32,7 @@ export const PhotoUploadPage: React.FC = () => {
 
   const handleUploadAndAnalyze = async () => {
     if (!frontFile) return;
-    const customerId = Number(localStorage.getItem('salon_customer_id') || 1);
+    const customerId = currentCustomerId();
     setLoading(true);
     setUploadError(null);
 
@@ -51,7 +52,7 @@ export const PhotoUploadPage: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center py-4 sm:py-6">
-      <div className="w-full max-w-2xl bg-slate-800/80 border border-slate-700/60 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl space-y-6">
+      <div className="w-full bg-slate-800/80 border border-slate-700/60 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl space-y-6">
         <div className="text-center">
           <span className="text-xs px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 font-semibold border border-amber-500/30">
             STEP 1 OF 4: DUAL-ANGLE PHOTO CAPTURE

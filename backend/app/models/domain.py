@@ -59,6 +59,7 @@ class Customer(Base):
     total_visits: Mapped[int] = mapped_column(Integer, default=0)
     total_spent: Mapped[float] = mapped_column(Float, default=0.0)
     last_visit_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # customer login
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class CustomerConsent(Base):

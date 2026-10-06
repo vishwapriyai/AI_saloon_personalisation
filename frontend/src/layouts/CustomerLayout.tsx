@@ -1,12 +1,22 @@
 import React from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Scissors, Sparkles, User, History, Home, ArrowLeft } from 'lucide-react';
+import { Sparkles, User, History, Home, ArrowLeft, LogOut, Users } from 'lucide-react';
+import { clearSession, getSession, isStaff } from '../auth/session';
+import { BrandLogo } from '../components/BrandLogo';
 
 export const CustomerLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
   const isHome = location.pathname === '/customer' || location.pathname === '/customer/login';
+  const session = getSession();
+  const staff = isStaff(session);
+  const servingName = staff ? localStorage.getItem('salon_customer_name') : null;
+
+  const logout = () => {
+    clearSession();
+    navigate(staff ? '/staff/login' : '/customer/login', { replace: true });
+  };
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-900">
@@ -22,44 +32,58 @@ export const CustomerLayout: React.FC = () => {
               <ArrowLeft className="w-6 h-6" />
             </button>
           )}
-          <div className="flex items-center space-x-2.5 cursor-pointer" onClick={() => navigate('/customer/login')}>
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-amber-300 flex items-center justify-center shadow-lg shadow-amber-500/20">
-              <Scissors className="w-6 h-6 text-slate-950 font-bold" />
-            </div>
-            <div>
-              <h1 className="font-bold text-lg leading-none tracking-tight text-white flex items-center gap-1.5">
-                LUXE STYLING <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-semibold border border-amber-500/30">AI</span>
-              </h1>
-              <p className="text-xs text-slate-400 font-medium">Smart Salon Personalization</p>
-            </div>
+          <BrandLogo onClick={() => navigate('/customer/login')} />
+        </div>
+
+        {/* Right side: account actions, with Logout last (top-right corner) */}
+        {session && (
+          <div className="flex items-center space-x-2">
+            {staff ? (
+              <button
+                onClick={() => navigate('/stylist/customers')}
+                className="px-3.5 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-sm font-medium flex items-center space-x-2 border border-slate-700/50 touch-target-large"
+                title="Back to the customer directory"
+              >
+                <Users className="w-4 h-4 text-amber-400" />
+                <span className="hidden sm:inline">{servingName ? `Serving: ${servingName}` : 'Customer Directory'}</span>
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => navigate('/customer/history')}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-sm font-medium flex items-center space-x-2 border border-slate-700/50 touch-target-large"
+                >
+                  <History className="w-4 h-4 text-amber-400" />
+                  <span className="hidden sm:inline">My History</span>
+                </button>
+                <button
+                  onClick={() => navigate('/customer/profile')}
+                  className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700/50 touch-target-large flex items-center justify-center"
+                  aria-label="My profile"
+                >
+                  <User className="w-5 h-5 text-amber-400" />
+                </button>
+              </>
+            )}
+            <button
+              onClick={logout}
+              className="px-3.5 py-2 rounded-xl bg-slate-800/80 hover:bg-rose-500/15 text-slate-200 hover:text-rose-300 text-sm font-medium flex items-center space-x-2 border border-slate-700/50 hover:border-rose-500/40 touch-target-large"
+              aria-label="Log out"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
           </div>
-        </div>
-
-        <div className="flex items-center space-x-2">
-          <button
-            onClick={() => navigate('/customer/history')}
-            className="px-3.5 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-sm font-medium flex items-center space-x-2 border border-slate-700/50 touch-target-large"
-          >
-            <History className="w-4 h-4 text-amber-400" />
-            <span className="hidden sm:inline">My History</span>
-          </button>
-
-          <button
-            onClick={() => navigate('/customer/profile')}
-            className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700/50 touch-target-large flex items-center justify-center"
-          >
-            <User className="w-5 h-5 text-amber-400" />
-          </button>
-        </div>
+        )}
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col">
+      <main className="flex-1 max-w-3xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col">
         <Outlet />
       </main>
 
       {/* Bottom Touch-friendly Navigation Bar for Mobile/Tablet */}
-      <nav className="sticky bottom-0 z-30 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 px-4 py-2 sm:hidden flex items-center justify-around">
+      {session && !staff && <nav className="sticky bottom-0 z-30 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 px-4 py-2 sm:hidden flex items-center justify-around">
         <button
           onClick={() => navigate('/customer/login')}
           className={`flex flex-col items-center py-1.5 px-3 rounded-lg text-xs font-medium transition-colors ${
@@ -87,7 +111,7 @@ export const CustomerLayout: React.FC = () => {
           <History className="w-5 h-5 mb-1" />
           History
         </button>
-      </nav>
+      </nav>}
     </div>
   );
 };

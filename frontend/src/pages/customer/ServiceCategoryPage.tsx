@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Scissors, Sparkles, User, ArrowRight, Palette, Check } from 'lucide-react';
 import { getRecommendations, getLastPreferences } from '../../api/client';
+import { currentCustomerId } from '../../auth/session';
 
 export const ServiceCategoryPage: React.FC = () => {
   const navigate = useNavigate();
@@ -73,8 +74,8 @@ export const ServiceCategoryPage: React.FC = () => {
 
   const handleGenerate = async () => {
     setLoading(true);
-    const customerId = Number(localStorage.getItem('salon_customer_id') || 1);
-    const photoId = Number(localStorage.getItem('salon_photo_id') || 1);
+    const customerId = currentCustomerId();
+    const photoId = Number(localStorage.getItem('salon_photo_id') || 0);
 
     try {
       const rec = await getRecommendations({
@@ -98,7 +99,7 @@ export const ServiceCategoryPage: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center py-4 sm:py-6">
-      <div className="w-full max-w-3xl space-y-6">
+      <div className="w-full space-y-6">
         <div className="text-center">
           <span className="text-xs px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 font-semibold border border-amber-500/30">
             STEP 2 OF 4: STYLE PREFERENCES

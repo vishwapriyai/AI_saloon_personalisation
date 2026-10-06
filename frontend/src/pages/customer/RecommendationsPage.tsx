@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, ArrowRight, RefreshCw, ImageOff, Sparkles } from 'lucide-react';
 import { saveSelection, generateStyleImages } from '../../api/client';
+import { currentCustomerId } from '../../auth/session';
 
 const SERVICE_LABELS: Record<string, string> = { Beard: 'Beard', Colour: 'Colour', Texture: 'Smoothening / Perm' };
 
@@ -95,7 +96,7 @@ export const RecommendationsPage: React.FC = () => {
 
   const handleConfirmSelection = async () => {
     if (!selectedStyleId) return;
-    const customerId = Number(localStorage.getItem('salon_customer_id') || 1);
+    const customerId = currentCustomerId();
     const chosen = styles.find((s) => s.style_id === selectedStyleId);
 
     try {
@@ -138,7 +139,7 @@ export const RecommendationsPage: React.FC = () => {
       </div>
 
       {/* Recommended styles: responsive touch grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 md:gap-3">
         {styles.map((style, idx) => {
           const isSelected = selectedStyleId === style.style_id;
           return (
@@ -184,19 +185,19 @@ export const RecommendationsPage: React.FC = () => {
                   </div>
                 )}
 
-                <div className="absolute top-3 left-3 bg-slate-950/80 backdrop-blur-md px-2.5 py-1 rounded-xl text-xs font-bold text-amber-400 border border-slate-700">
+                <div className="absolute top-2 left-2 bg-slate-950/80 backdrop-blur-md px-2 py-0.5 rounded-lg text-[11px] font-bold text-amber-400 border border-slate-700">
                   Option #{idx + 1}
                 </div>
 
                 {isSelected && (
-                  <div className="absolute top-3 right-3 w-8 h-8 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shadow-lg">
+                  <div className="absolute top-2 right-2 w-7 h-7 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shadow-lg">
                     <Check className="w-5 h-5 stroke-[3]" />
                   </div>
                 )}
               </div>
 
               {/* Style Information & Expert Analysis */}
-              <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
+              <div className="p-4 md:p-3 flex-1 flex flex-col justify-between space-y-3">
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-1.5">
@@ -213,7 +214,7 @@ export const RecommendationsPage: React.FC = () => {
                       <span className="text-[11px] text-slate-400 font-medium">{style.hair_length}</span>
                     )}
                   </div>
-                  <h3 className="font-bold text-white text-base leading-snug">{style.name}</h3>
+                  <h3 className="font-bold text-white text-base md:text-sm leading-snug">{style.name}</h3>
                   {style.feasibility_warning && (
                     <p className="text-[11px] text-amber-300 mt-1">{style.feasibility_warning}</p>
                   )}
