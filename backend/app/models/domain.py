@@ -204,7 +204,7 @@ class StyleRecommendation(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"))
     photo_id: Mapped[int] = mapped_column(ForeignKey("customer_photos.id"))
-    target_service_type: Mapped[str] = mapped_column(String(50))
+    target_service_type: Mapped[str] = mapped_column(String(255))  # several services, e.g. "Hair, Beard, Colour / Balayage"
     style_category: Mapped[str] = mapped_column(String(50))
     recommended_style_ids_json: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
