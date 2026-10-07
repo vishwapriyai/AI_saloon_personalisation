@@ -653,7 +653,7 @@ class HairStyleGenerator:
         if provider not in self._editors:
             if provider == "nvidia":
                 self._editors[provider] = nvidia_nim_client
-            elif provider == "cloudflare":
+            elif provider in ("cloudflare", "cloudfare"):
                 self._editors[provider] = CloudflareEditor()
             elif provider == "openrouter":
                 self._editors[provider] = OpenRouterEditor()
