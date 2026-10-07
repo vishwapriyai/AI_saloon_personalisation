@@ -113,9 +113,9 @@ class HairstyleRecommendationEngine:
                 if target_length != "bald" and not style.get("is_hair_replacement_unit"):
                     score -= 800.0
                     feasibility_score = 0.0
-                    feasibility_status = "Not Feasible (Current Hair Density: Bald / Sparse)"
-                    feasibility_warning = ("Based on the uploaded photo, current hair density is Bald / Sparse. "
-                                           "This hairstyle requires natural hair growth or a hair replacement toupee unit.")
+                    feasibility_status = "Not Applicable (Bald / Clean Shaved Scalp)"
+                    feasibility_warning = ("We don't have hair-based haircut service for you because your photo analysis shows a bald / clean shaved scalp. "
+                                           "Please choose Beard & Grooming or Scalp Care service instead, as haircut services are only for customers with hair.")
             elif current_length in LENGTH_RANK and target_length in LENGTH_RANK \
                     and LENGTH_RANK[target_length] > LENGTH_RANK[current_length]:
                 score -= 60.0
@@ -131,12 +131,14 @@ class HairstyleRecommendationEngine:
                 feasibility_warning = ("Based on the current hair density, this hairstyle may not hold its shape on the "
                                        "top area. We recommend a shorter, lighter alternative.")
         elif service == "Beard":
-            # A beard style needs an existing beard; a clean-shaven customer can always have a clean shave
-            if style.get("requires_beard", True) and (beard_style or "") == "Clean Shaven":
-                score -= 60.0
-                feasibility_score = 60.0
-                feasibility_status = "Needs Beard Growth"
-                feasibility_warning = "Needs a few weeks of beard growth first. We recommend a clean shave or stubble style today."
+            # A beard style needs an existing beard; clean-shaven or beard-less customers cannot have beard sculpting services
+            no_beard = not beard_style or beard_style in ("Clean Shaven", "None", "Unknown")
+            if style.get("requires_beard", True) and no_beard:
+                score -= 800.0
+                feasibility_score = 0.0
+                feasibility_status = "Not Applicable (No Existing Beard)"
+                feasibility_warning = ("We don't have beard grooming/sculpting services for clean-shaven faces. "
+                                       "We cannot generate a beard for a non-bearded person. Please grow a beard first or select Clean Shave.")
 
         chemical_addon = None
         if style.get("requires_chemical_service"):

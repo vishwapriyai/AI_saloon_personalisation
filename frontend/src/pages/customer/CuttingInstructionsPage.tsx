@@ -171,7 +171,8 @@ export const CuttingInstructionsPage: React.FC = () => {
   const viewStatus = (v: PhotoView) => {
     if (v === 'front') return frontPreview ? null : 'No preview';
     if (!comparison) return selectionId ? 'Loading...' : 'Not available';
-    if (v === 'back' && comparison.style.service === 'Beard') return 'Not needed for beard';
+    const isBeardOrBald = comparison.style.service === 'Beard' || comparison.style.hair_length === 'Bald';
+    if (v === 'back' && isBeardOrBald) return 'Not needed for beard / bald scalp';
     if (!comparison.before[v]) return 'No photo captured';
     return viewsTimedOut ? 'Preview unavailable' : 'Generating...';
   };

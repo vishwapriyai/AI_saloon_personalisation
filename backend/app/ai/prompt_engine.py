@@ -93,12 +93,19 @@ class ControlledPromptEngine:
         cust_len = str(customer_analysis.get("hair_length", "")).lower()
         cust_den = str(customer_analysis.get("hair_density", "")).lower()
         is_cust_bald = cust_len == "bald" or "bald" in cust_den or "sparse" in cust_den
-        style_len = str(style_metadata.get("hair_length", "")).lower()
+        service = _service(style_metadata)
 
-        if is_cust_bald and style_len == "bald":
-            p = ("Image edit, not text-to-image. The customer in the photo has a clean bald head. "
-                 "DO NOT ADD HAIR TO THE HEAD. Keep the scalp completely bald, smooth, and clean with natural skin texture. "
-                 "Do not draw hair on top. Keep the customer's exact face, facial identity, beard, skin tone, clothing, and background identical.")
+        if is_cust_bald and service != "Beard":
+            p = ("Image edit, not text-to-image. The customer in the photo has a clean bald / sparse scalp. "
+                 "DO NOT GENERATE OR SYNTHESIZE HAIR ON THE HEAD. Keep the scalp completely bald, smooth, and clean "
+                 "with natural skin texture as in the photo. Do not draw hair or hair strands on top. "
+                 "Keep the customer's exact face, beard, skin tone, clothing, and background identical.")
+            return p[:max_chars] if max_chars else p
+
+        if service == "Beard" and not _has_beard(customer_analysis) and style_metadata.get("requires_beard", True):
+            p = ("Image edit, not text-to-image. The customer in the photo has a clean-shaven face with no beard growth. "
+                 "DO NOT GENERATE OR DRAW A BEARD ON A CLEAN SHAVEN FACE. Maintain the customer's natural clean-shaven "
+                 "skin texture and face. Keep the top hairstyle, skin tone, clothing, and background identical.")
             return p[:max_chars] if max_chars else p
 
         prompt = self._full_prompt(customer_analysis, style_metadata, strict, with_reference_image)
@@ -273,16 +280,18 @@ class ControlledPromptEngine:
             keep = (f"Change only the texture: keep the exact haircut, length, shape and the natural "
                     f"{colour.lower() + ' ' if _known(colour) else ''}hair colour.")
         elif service == "Beard":
-            keep = "Do not change the hairstyle."
+            keep = "Do not change the top hairstyle. Keep natural beard growth texture; do not draw artificial outline lines, black borders, or drawn strokes on the face or jawline."
         else:
             keep = (f"Keep the hair's natural {colour.lower() + ' ' if _known(colour) else ''}colour, its own texture "
                     "and density, and the natural hairline and neckline.")
+            if _has_beard(analysis):
+                keep += " Keep the customer's exact facial hair, beard, moustache, and beard shape completely unchanged; do not shave, trim or draw artificial outline lines on the beard."
         identity = ("Only the hair may change; everything else must stay pixel-identical." if strict else
                     f"Everything except the {target} stays exactly as in the photo: same person, skin, ears, neck, "
-                    "clothing, pose, camera angle, background and lighting.")
+                    "clothing, pose, camera angle, background and lighting. Do not draw any outline lines or black strokes on the skin.")
         head = (f"Image edit, not text-to-image. This photo shows the {angle} of a salon customer. Change only the "
                 f"{target} to this {what}, as it looks from this angle: ")
-        tail = f" {keep} {identity} Add nothing new. Photorealistic, natural hair strands, realistic hairline."
+        tail = f" {keep} {identity} Add nothing new. Photorealistic, natural skin texture, realistic beard, no drawn outline lines."
         description = _edit_description(style)
         if max_chars and len(head) + len(description) + len(tail) > max_chars:
             room = max(0, max_chars - len(head) - len(tail) - 1)

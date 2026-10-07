@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Scissors, Sparkles, User, ArrowRight, Palette, Check, Wind } from 'lucide-react';
+import { Scissors, Sparkles, User, ArrowRight, Palette, Check, Wind, AlertTriangle } from 'lucide-react';
 import { getRecommendations, getLastPreferences } from '../../api/client';
 import { currentCustomerId } from '../../auth/session';
 import { HairAnalysisCard } from '../../components/HairAnalysisCard';
@@ -12,6 +12,20 @@ export const ServiceCategoryPage: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<'Classic' | 'Trendy' | 'Professional'>('Trendy');
   const [loading, setLoading] = useState(false);
   const [fromLastVisit, setFromLastVisit] = useState(false);
+
+  // Check if customer photo analysis indicates a bald or clean shaved scalp
+  const photoAnalysis = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('salon_photo_analysis') || 'null');
+    } catch {
+      return null;
+    }
+  })();
+  const hairLen = String(photoAnalysis?.hair_length || '').toLowerCase();
+  const hairDen = String(photoAnalysis?.hair_density || '').toLowerCase();
+  const beardStyle = String(photoAnalysis?.beard_style_current || photoAnalysis?.beard_style || '').toLowerCase();
+  const isCustomerBald = hairLen === 'bald' || hairDen.includes('bald') || hairDen.includes('sparse');
+  const isCleanShaven = !beardStyle || beardStyle === 'clean shaven' || beardStyle === 'none' || beardStyle === 'unknown';
 
   // Returning customers: pre-select what they chose last time (they can still change it)
   useEffect(() => {
@@ -33,6 +47,13 @@ export const ServiceCategoryPage: React.FC = () => {
     return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // If customer is bald, auto-switch default to Beard if selecting haircut
+  useEffect(() => {
+    if (isCustomerBald && selectedGender !== 'Women' && selectedServices.includes('Hair') && !selectedServices.includes('Beard')) {
+      setSelectedServices(['Beard']);
+    }
+  }, [isCustomerBald, selectedGender]);
 
   const collections = [
     { id: 'Women', title: "Women's Collection", desc: "Layers, bobs, curtain bangs, balayage & glossing" },
@@ -112,6 +133,30 @@ export const ServiceCategoryPage: React.FC = () => {
         </div>
 
         <HairAnalysisCard showBeard={selectedGender !== 'Women'} />
+
+        {isCustomerBald && (
+          <div className="bg-amber-500/15 border border-amber-500/40 p-4 rounded-2xl flex items-start space-x-3 text-amber-200 text-xs sm:text-sm shadow-sm">
+            <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold text-amber-300 block">Notice: Clean Shaved / Bald Scalp Detected</span>
+              <p className="text-slate-300 leading-relaxed">
+                We don't have hair-based haircut services for you because your photo analysis shows a bald or clean shaved scalp. Haircut services are only for customers with hair. Please select <b>Beard & Grooming</b> service instead.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {isCleanShaven && selectedServices.includes('Beard') && !isCustomerBald && (
+          <div className="bg-amber-500/15 border border-amber-500/40 p-4 rounded-2xl flex items-start space-x-3 text-amber-200 text-xs sm:text-sm shadow-sm">
+            <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold text-amber-300 block">Notice: Clean-Shaven Face Detected</span>
+              <p className="text-slate-300 leading-relaxed">
+                We cannot generate a beard for a non-bearded person. Beard trimming & sculpting services require existing facial hair growth. For clean-shaven faces, Clean Shave or facial skin care services apply.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Style Collection Selection (Women's / Men's / All) */}
         <div>

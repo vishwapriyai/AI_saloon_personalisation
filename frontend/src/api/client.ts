@@ -410,7 +410,7 @@ export type ViewSet = Record<PhotoView, string | null>;
 export interface SelectionComparison {
   selection_id: number;
   status: string;
-  style: { id: number | null; name: string | null; service: string };
+  style: { id: number | null; name: string | null; service: string; hair_length?: string };
   before: ViewSet;
   ai: ViewSet;
   after: ViewSet;
