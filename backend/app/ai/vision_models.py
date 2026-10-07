@@ -262,6 +262,8 @@ def hair_length(mask: np.ndarray, face: FaceGeometry) -> tuple[str, float]:
     """Length from where the visible hair ends relative to the chin, in face heights."""
     fh = face.height
     visible = int(mask.sum())
+    if visible < 0.05 * face.width ** 2:
+        return "Bald", 0.95
     if visible < 0.6 * face.width ** 2:
         # Little hair visible from the front: tied back, covered, or close-cropped. Real length can't be judged.
         return UNKNOWN, 0.0
@@ -272,7 +274,7 @@ def hair_length(mask: np.ndarray, face: FaceGeometry) -> tuple[str, float]:
         if top < face.chin_y and stats[i, cv2.CC_STAT_AREA] > 0.02 * visible:
             keep |= labels == i
     if not keep.any():
-        return UNKNOWN, 0.0
+        return "Bald", 0.95
     bottom = float(np.nonzero(keep)[0].max())
     r = (bottom - face.chin_y) / fh
     if r < 0.3:

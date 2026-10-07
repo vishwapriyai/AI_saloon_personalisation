@@ -1,23 +1,100 @@
 @import "tailwindcss";
 
-@layer base {
-  :root {
-    --bg-primary: #0f172a;
-    --bg-card: #1e293b;
-    --text-primary: #f8fafc;
-    --accent-gold: #f59e0b;
-    --accent-purple: #8b5cf6;
-    --accent-cyan: #06b6d4;
-  }
+/*
+  Salon theme: light, warm and natural (linen background, white cards, leaf-green accent).
+  The app's classes use Tailwind's slate / amber / ... names; this theme maps them to the salon palette:
+    slate-950/900/800  -> linen page, soft panels, white cards      (light surfaces)
+    slate-700/600      -> borders and secondary buttons
+    slate-500...50, white -> text, from muted to ink                (dark text)
+    amber              -> brand green (buttons, links, highlights)
+    emerald / rose / sky / purple ... -> calm earthy status and icon colours
+  To change the brand colour, edit the amber values only.
+*/
+@theme {
+  --font-sans: "Nunito Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-serif: "Fraunces", Georgia, "Times New Roman", serif;
 
+  --color-white: #2a2520;
+  --color-black: #1c1814;
+
+  --color-slate-50: #211c18;
+  --color-slate-100: #2c2621;
+  --color-slate-200: #3b342d;
+  --color-slate-300: #4f463e;
+  --color-slate-400: #6c6257;
+  --color-slate-500: #8a7f72;
+  --color-slate-600: #d3c8b8;
+  --color-slate-700: #e5ddd1;
+  --color-slate-800: #ffffff;
+  --color-slate-900: #fbf8f3;
+  --color-slate-950: #f4efe6;
+
+  --color-amber-50: #eef3ee;
+  --color-amber-100: #dce8de;
+  --color-amber-200: #2d5a43;
+  --color-amber-300: #2f5d46;
+  --color-amber-400: #3a6b52;
+  --color-amber-500: #2f5d46;
+  --color-amber-600: #244a37;
+  --color-amber-700: #1d3d2d;
+
+  --color-emerald-200: #2b6747;
+  --color-emerald-300: #2e7350;
+  --color-emerald-400: #2e7350;
+  --color-emerald-500: #3b8560;
+  --color-emerald-600: #2f6f4f;
+  --color-emerald-700: #265b41;
+  --color-emerald-950: #edf5ef;
+
+  --color-rose-300: #a2442f;
+  --color-rose-400: #a2442f;
+  --color-rose-500: #b4553b;
+  --color-rose-600: #983f2b;
+  --color-red-300: #a2442f;
+  --color-red-400: #a2442f;
+  --color-red-500: #b4553b;
+
+  --color-sky-300: #3a6a84;
+  --color-sky-400: #3a6a84;
+  --color-sky-500: #3a6a84;
+  --color-purple-300: #77507a;
+  --color-purple-400: #77507a;
+  --color-purple-500: #77507a;
+  --color-cyan-300: #347572;
+  --color-cyan-400: #347572;
+  --color-cyan-500: #347572;
+  --color-indigo-200: #4a5788;
+  --color-indigo-400: #4a5788;
+  --color-indigo-500: #4a5788;
+  --color-fuchsia-300: #8a476d;
+  --color-fuchsia-500: #8a476d;
+  --color-pink-300: #984c61;
+  --color-pink-500: #984c61;
+  --color-orange-300: #a3602c;
+  --color-orange-500: #a3602c;
+}
+
+@layer base {
   body {
-    background-color: var(--bg-primary);
-    color: var(--text-primary);
-    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #f4efe6;
+    color: #2a2520;
+    font-family: var(--font-sans);
     margin: 0;
     padding: 0;
     -webkit-font-smoothing: antialiased;
   }
+
+  h1, h2, h3 {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  /* small uppercase section labels stay in the sans font */
+  h1.uppercase, h2.uppercase, h3.uppercase, h4.uppercase { font-family: var(--font-sans); font-weight: 700; letter-spacing: 0.05em; }
+
+  ::placeholder { color: #a39788; }
+  :focus-visible { outline: 2px solid #2f5d46; outline-offset: 2px; }
 }
 
 /* Custom Utilities for Touch & Tablet Optimization */
@@ -26,33 +103,18 @@
   min-width: 48px;
 }
 
-.glass-panel {
-  background: rgba(30, 41, 59, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.glow-effect-gold {
-  box-shadow: 0 0 20px rgba(245, 158, 11, 0.3);
-}
-
-.glow-effect-purple {
-  box-shadow: 0 0 20px rgba(139, 92, 246, 0.35);
-}
-
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0f172a;
+  background: #f4efe6;
 }
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: #d3c8b8;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #b9ac99;
 }

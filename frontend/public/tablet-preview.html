@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tablet Preview</title>
+<!--
+  Tablet emulator for the salon app. Open while the frontend dev server runs:
+    http://localhost:5173/tablet-preview.html
+  The app is shown at the tablet's real CSS size (so Tailwind md/lg breakpoints match the device),
+  scaled down to fit this window. Same origin as the app, so logins and sessions work normally.
+-->
+<style>
+  :root {
+    --bg: #0b1120; --panel: #111827; --border: #334155; --text: #e2e8f0; --muted: #94a3b8;
+    --accent: #f59e0b; --bezel: #1f2937;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; color: var(--accent); white-space: nowrap; }
+  select, input, button { font: inherit; color: var(--text); background: #0f172a; border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px; min-height: 36px; }
+  input { width: 220px; }
+  button { cursor: pointer; }
+  button:hover, select:hover { border-color: var(--accent); }
+  .size { color: var(--muted); font-variant-numeric: tabular-nums; margin-left: auto; white-space: nowrap; }
+  main { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 16px; }
+  .device { position: relative; flex: none; transform-origin: center center; background: var(--bezel);
+    border-radius: 36px; padding: 28px; box-shadow: 0 30px 80px rgba(0,0,0,.6), inset 0 0 0 2px #374151; }
+  .device::before { content: ""; position: absolute; width: 8px; height: 8px; border-radius: 50%; background: #4b5563;
+    top: 50%; left: 10px; transform: translateY(-50%); }
+  .device.portrait::before { top: 10px; left: 50%; transform: translateX(-50%); }
+  iframe { display: block; border: 0; border-radius: 10px; background: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Tablet Preview</h1>
+  <select id="device" aria-label="Device">
+    <option value="810x1080">iPad 10.2" (810 × 1080)</option>
+    <option value="820x1180" selected>iPad Air / iPad 10th gen (820 × 1180)</option>
+    <option value="834x1194">iPad Pro 11" (834 × 1194)</option>
+    <option value="1024x1366">iPad Pro 12.9" (1024 × 1366)</option>
+    <option value="744x1133">iPad mini (744 × 1133)</option>
+    <option value="800x1280">Samsung Galaxy Tab A / S (800 × 1280)</option>
+    <option value="753x1205">Samsung Galaxy Tab S9 (753 × 1205)</option>
+    <option value="600x960">7" Android tablet (600 × 960)</option>
+  </select>
+  <button id="rotate" title="Rotate">⟳ Landscape</button>
+  <select id="zoom" aria-label="Zoom">
+    <option value="fit" selected>Fit to window</option>
+    <option value="1">100%</option>
+    <option value="0.75">75%</option>
+    <option value="0.5">50%</option>
+  </select>
+  <input id="path" value="/customer/login" aria-label="Page path" spellcheck="false" />
+  <select id="jump" aria-label="Go to page">
+    <option value="">Go to page…</option>
+    <option value="/customer/login">Customer login</option>
+    <option value="/staff/login">Staff login</option>
+    <option value="/stylist/customers">Stylist – Customers</option>
+    <option value="/admin/dashboard">Admin dashboard</option>
+    <option value="/customer/photo">Photo capture</option>
+    <option value="/customer/service">Service & analysis</option>
+    <option value="/customer/recommendations">Recommendations</option>
+    <option value="/customer/instructions">Cutting instructions</option>
+    <option value="/customer/confirmation">Post-service comparison</option>
+    <option value="/customer/profile">Customer profile</option>
+    <option value="/customer/history">Customer history</option>
+  </select>
+  <button id="reload" title="Reload">↻ Reload</button>
+  <span class="size" id="size"></span>
+</header>
+<main id="stage">
+  <div class="device portrait" id="frame"><iframe id="app" title="Salon app on a tablet"></iframe></div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('tablet_preview') || '{}'); } catch { return {}; } })();
+  let landscape = !!saved.landscape;
+  if (saved.device) $('device').value = saved.device;
+  if (saved.zoom) $('zoom').value = saved.zoom;
+  if (saved.path) $('path').value = saved.path;
+
+  function persist() {
+    try { localStorage.setItem('tablet_preview', JSON.stringify({ device: $('device').value, zoom: $('zoom').value, landscape, path: $('path').value })); } catch {}
+  }
+
+  function layout() {
+    let [w, h] = $('device').value.split('x').map(Number);
+    if (landscape) [w, h] = [h, w];
+    const app = $('app'), frame = $('frame');
+    app.style.width = w + 'px';
+    app.style.height = h + 'px';
+    frame.classList.toggle('portrait', !landscape);
+    $('rotate').textContent = landscape ? '⟳ Portrait' : '⟳ Landscape';
+    const bezel = 56, stage = $('stage');
+    const fit = Math.min((stage.clientWidth - 32) / (w + bezel), (stage.clientHeight - 32) / (h + bezel), 1);
+    const scale = $('zoom').value === 'fit' ? fit : Number($('zoom').value);
+    frame.style.transform = `scale(${scale})`;
+    // keep the scaled frame from forcing scrollbars
+    frame.style.margin = `${-(h + bezel) * (1 - scale) / 2}px ${-(w + bezel) * (1 - scale) / 2}px`;
+    $('size').textContent = `${w} × ${h} CSS px · ${Math.round(scale * 100)}%`;
+    persist();
+  }
+
+  function go(path) {
+    const p = (path || '/').startsWith('/') ? path : '/' + path;
+    $('path').value = p;
+    $('app').src = p;
+    persist();
+  }
+
+  // Keep the path box in sync as you navigate inside the app (same origin)
+  $('app').addEventListener('load', () => {
+    try {
+      const loc = $('app').contentWindow.location;
+      $('path').value = loc.pathname + loc.search;
+      const sync = () => { try { $('path').value = $('app').contentWindow.location.pathname; persist(); } catch {} };
+      $('app').contentWindow.addEventListener('popstate', sync);
+      $('app').contentWindow.addEventListener('click', () => setTimeout(sync, 50));
+    } catch {}
+  });
+
+  $('device').onchange = layout;
+  $('zoom').onchange = layout;
+  $('rotate').onclick = () => { landscape = !landscape; layout(); };
+  $('reload').onclick = () => $('app').contentWindow.location.reload();
+  $('path').onkeydown = (e) => { if (e.key === 'Enter') go($('path').value.trim()); };
+  $('jump').onchange = (e) => { if (e.target.value) go(e.target.value); e.target.value = ''; };
+  window.addEventListener('resize', layout);
+
+  layout();
+  go($('path').value);
+</script>
+</body>
+</html>

@@ -21,7 +21,7 @@ export const StylistDashboardPage: React.FC = () => {
 
         <button
           onClick={() => navigate('/customer/instructions')}
-          className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-sm flex items-center space-x-2"
+          className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-sm flex items-center space-x-2"
         >
           <Volume2 className="w-4 h-4" />
           <span>Open Cutting Audio Player</span>
@@ -32,7 +32,7 @@ export const StylistDashboardPage: React.FC = () => {
         {appointments.map((app) => (
           <div
             key={app.id}
-            className="bg-slate-900/80 border border-slate-800 p-5 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+            className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
           >
             <div className="flex items-center space-x-4">
               <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 font-bold flex items-center justify-center">

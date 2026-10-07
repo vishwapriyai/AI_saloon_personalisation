@@ -49,8 +49,11 @@ add_missing_columns()
 from app.core.auth import seed_auth  # noqa: E402
 from app.core.database import SessionLocal  # noqa: E402
 
+from app.core.reference_data import seed_reference_data  # noqa: E402
+
 with SessionLocal() as _db:
     seed_auth(_db)
+    seed_reference_data(_db)
 
 
 app = FastAPI(

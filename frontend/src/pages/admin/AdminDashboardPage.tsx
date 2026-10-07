@@ -24,7 +24,7 @@ export const AdminDashboardPage: React.FC = () => {
 
         <button
           onClick={() => navigate('/customer/login')}
-          className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-sm flex items-center space-x-2 shadow-lg shadow-amber-500/20 active:scale-95 transition-all"
+          className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-sm flex items-center space-x-2 shadow-sm active:scale-95 transition-all"
         >
           <Scissors className="w-4 h-4 text-slate-950" />
           <span>Open Tablet Customer Portal</span>
@@ -33,7 +33,7 @@ export const AdminDashboardPage: React.FC = () => {
 
       {/* Overview Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-3xl space-y-3">
+        <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Revenue</span>
             <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold">
@@ -48,7 +48,7 @@ export const AdminDashboardPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-3xl space-y-3">
+        <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Visits</span>
             <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center font-bold">
@@ -61,7 +61,7 @@ export const AdminDashboardPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-3xl space-y-3">
+        <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Capacity Utilization</span>
             <div className="w-10 h-10 rounded-2xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center font-bold">
@@ -74,7 +74,7 @@ export const AdminDashboardPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-3xl space-y-3">
+        <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Campaigns</span>
             <div className="w-10 h-10 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center font-bold">
@@ -92,7 +92,7 @@ export const AdminDashboardPage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div
           onClick={() => navigate('/admin/analytics/capacity')}
-          className="bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 p-6 rounded-3xl cursor-pointer transition-all space-y-4 group"
+          className="bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 p-6 rounded-2xl cursor-pointer transition-all space-y-4 group"
         >
           <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center">
             <BarChart3 className="w-6 h-6" />
@@ -108,7 +108,7 @@ export const AdminDashboardPage: React.FC = () => {
 
         <div
           onClick={() => navigate('/admin/customers')}
-          className="bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 p-6 rounded-3xl cursor-pointer transition-all space-y-4 group"
+          className="bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 p-6 rounded-2xl cursor-pointer transition-all space-y-4 group"
         >
           <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center">
             <Users className="w-6 h-6" />
@@ -124,7 +124,7 @@ export const AdminDashboardPage: React.FC = () => {
 
         <div
           onClick={() => navigate('/admin/campaigns')}
-          className="bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 p-6 rounded-3xl cursor-pointer transition-all space-y-4 group"
+          className="bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 p-6 rounded-2xl cursor-pointer transition-all space-y-4 group"
         >
           <div className="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-400 flex items-center justify-center">
             <Tag className="w-6 h-6" />

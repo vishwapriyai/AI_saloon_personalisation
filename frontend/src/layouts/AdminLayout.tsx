@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Users, Scissors, BarChart3, Tag, Award, Settings, Menu, X, LogOut, ChevronRight, UserSearch
 } from 'lucide-react';
 import { clearSession, getSession } from '../auth/session';
+import { BRAND } from '../config/brand';
 
 export const AdminLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -39,7 +40,7 @@ export const AdminLayout: React.FC = () => {
           >
             {sidebarOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
-          <span className="font-bold text-amber-400">SALON AI ADMIN</span>
+          <span className="font-bold text-amber-400">{BRAND.name} Admin</span>
         </div>
         <button onClick={logout} className="text-xs px-3 py-2 rounded-lg bg-slate-800 hover:bg-rose-500/15 text-slate-300 hover:text-rose-300 flex items-center gap-1.5" aria-label="Log out">
           <LogOut className="w-4 h-4" />
@@ -56,7 +57,7 @@ export const AdminLayout: React.FC = () => {
         <div>
           <div className="p-6 border-b border-slate-800 hidden lg:flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-amber-300 flex items-center justify-center font-bold text-slate-950">
+              <div className="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center font-bold text-slate-950">
                 AI
               </div>
               <div>
@@ -79,7 +80,7 @@ export const AdminLayout: React.FC = () => {
                   }}
                   className={`w-full flex items-center justify-between px-4 py-3 rounded-xl font-medium text-sm transition-all ${
                     isActive
-                      ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-semibold'
+                      ? 'bg-amber-500 text-slate-950 shadow-sm font-semibold'
                       : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
                   }`}
                 >

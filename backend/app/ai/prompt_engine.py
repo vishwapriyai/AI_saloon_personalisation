@@ -1,6 +1,6 @@
 from typing import Any, Dict, Optional
 
-PROMPT_TEMPLATE_VERSION = "hair-edit-v6"
+PROMPT_TEMPLATE_VERSION = "hair-edit-v7"
 
 UNKNOWN = "Unknown"
 LENGTH_ORDER = {"Very Short": 0, "Short": 1, "Medium": 2, "Long": 3, "Very Long": 4}
@@ -90,6 +90,17 @@ class ControlledPromptEngine:
         with_reference_image: bool = False,
         max_chars: Optional[int] = None,
     ) -> str:
+        cust_len = str(customer_analysis.get("hair_length", "")).lower()
+        cust_den = str(customer_analysis.get("hair_density", "")).lower()
+        is_cust_bald = cust_len == "bald" or "bald" in cust_den or "sparse" in cust_den
+        style_len = str(style_metadata.get("hair_length", "")).lower()
+
+        if is_cust_bald and style_len == "bald":
+            p = ("Image edit, not text-to-image. The customer in the photo has a clean bald head. "
+                 "DO NOT ADD HAIR TO THE HEAD. Keep the scalp completely bald, smooth, and clean with natural skin texture. "
+                 "Do not draw hair on top. Keep the customer's exact face, facial identity, beard, skin tone, clothing, and background identical.")
+            return p[:max_chars] if max_chars else p
+
         prompt = self._full_prompt(customer_analysis, style_metadata, strict, with_reference_image)
         if max_chars and len(prompt) > max_chars:
             prompt = self._compact_prompt(customer_analysis, style_metadata, strict, with_reference_image, max_chars)
@@ -246,6 +257,37 @@ class ControlledPromptEngine:
             lines.append("Keep the beard and moustache exactly as they are.")
         lines.append("Adapt the hairstyle to the customer's actual hair.")
         return " ".join(lines)
+
+
+    def build_view_prompt(self, analysis: Dict[str, Any], style: Dict[str, Any], view: str,
+                          strict: bool = False, max_chars: Optional[int] = None) -> str:
+        """Edit prompt for the side or back photo of the customer (no face to preserve in a back view)."""
+        service = _service(style)
+        target = "beard and moustache" if service == "Beard" else "hair"
+        what = {"Beard": "beard style", "Colour": "salon hair colour", "Texture": "salon hair texture"}.get(service, "salon haircut")
+        angle = "side profile" if view == "side" else "back of the head"
+        colour = analysis.get("hair_color_detected")
+        if service == "Colour":
+            keep = "Change only the colour: keep the exact haircut, length, shape and texture."
+        elif service == "Texture":
+            keep = (f"Change only the texture: keep the exact haircut, length, shape and the natural "
+                    f"{colour.lower() + ' ' if _known(colour) else ''}hair colour.")
+        elif service == "Beard":
+            keep = "Do not change the hairstyle."
+        else:
+            keep = (f"Keep the hair's natural {colour.lower() + ' ' if _known(colour) else ''}colour, its own texture "
+                    "and density, and the natural hairline and neckline.")
+        identity = ("Only the hair may change; everything else must stay pixel-identical." if strict else
+                    f"Everything except the {target} stays exactly as in the photo: same person, skin, ears, neck, "
+                    "clothing, pose, camera angle, background and lighting.")
+        head = (f"Image edit, not text-to-image. This photo shows the {angle} of a salon customer. Change only the "
+                f"{target} to this {what}, as it looks from this angle: ")
+        tail = f" {keep} {identity} Add nothing new. Photorealistic, natural hair strands, realistic hairline."
+        description = _edit_description(style)
+        if max_chars and len(head) + len(description) + len(tail) > max_chars:
+            room = max(0, max_chars - len(head) - len(tail) - 1)
+            description = description[:room].rsplit(" ", 1)[0] + "."
+        return head + description + tail
 
 
 prompt_engine = ControlledPromptEngine()

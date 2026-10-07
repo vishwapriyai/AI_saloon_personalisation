@@ -25,7 +25,7 @@ EXPERT_FACE_SHAPE_RULES = {
 TEXTURE_FAMILY = {"straight": "1", "wavy": "2", "curly": "3", "coily": "4"}
 
 # Rough length ranks for comparing the customer's current hair with a style's finished length
-LENGTH_RANK = {"very short": 0, "short": 1, "bob": 1.5, "lob": 2, "medium": 2, "long": 3, "very long": 4}
+LENGTH_RANK = {"bald": 0, "sparse": 0, "none": 0, "very short": 1, "short": 2, "bob": 2.5, "lob": 3, "medium": 3, "long": 4, "very long": 5}
 
 # The face analyzer reports "Oblong"; the expert rules and catalogue use "Rectangle"
 FACE_SHAPE_ALIASES = {"Oblong": "Rectangle"}
@@ -102,22 +102,41 @@ class HairstyleRecommendationEngine:
         # 5. Feasibility
         feasibility_status, feasibility_warning, feasibility_score = "Achievable Today", None, 100.0
         if service == "Hair":
-            # A haircut cannot add length
             target_length = style.get("hair_length", "Medium").lower()
             current_length = (hair_length or "").lower()
-            if current_length in LENGTH_RANK and target_length in LENGTH_RANK \
+            curr_density = (hair_density or "").lower()
+
+            # Bald or extremely sparse hair density handling
+            is_bald = current_length in ("bald", "sparse", "none") or "bald" in curr_density or "sparse" in curr_density
+            if is_bald:
+                # If current head is bald and style is NOT bald-friendly (e.g. requires medium/long/quiff hair on top)
+                if target_length != "bald" and not style.get("is_hair_replacement_unit"):
+                    score -= 800.0
+                    feasibility_score = 0.0
+                    feasibility_status = "Not Feasible (Current Hair Density: Bald / Sparse)"
+                    feasibility_warning = ("Based on the uploaded photo, current hair density is Bald / Sparse. "
+                                           "This hairstyle requires natural hair growth or a hair replacement toupee unit.")
+            elif current_length in LENGTH_RANK and target_length in LENGTH_RANK \
                     and LENGTH_RANK[target_length] > LENGTH_RANK[current_length]:
                 score -= 60.0
                 feasibility_score = 60.0
                 feasibility_status = "Needs Extensions / Growth"
-                feasibility_warning = "Longer than your current hair: needs growth or extensions."
+                feasibility_warning = ("Based on your current hair length, this style needs more length than you have "
+                                       "today (growth or extensions). We recommend a shorter alternative.")
+            # Fine (low-density) hair cannot hold styles that rely on thick hair for their shape on top
+            elif hair_density == "Fine" and "Fine" not in style.get("recommended_hair_densities", ["Medium"]):
+                score -= 45.0
+                feasibility_score = 55.0
+                feasibility_status = "Not Suitable for Current Density"
+                feasibility_warning = ("Based on the current hair density, this hairstyle may not hold its shape on the "
+                                       "top area. We recommend a shorter, lighter alternative.")
         elif service == "Beard":
             # A beard style needs an existing beard; a clean-shaven customer can always have a clean shave
             if style.get("requires_beard", True) and (beard_style or "") == "Clean Shaven":
                 score -= 60.0
                 feasibility_score = 60.0
                 feasibility_status = "Needs Beard Growth"
-                feasibility_warning = "Needs a few weeks of beard growth first."
+                feasibility_warning = "Needs a few weeks of beard growth first. We recommend a clean shave or stubble style today."
 
         chemical_addon = None
         if style.get("requires_chemical_service"):
@@ -136,6 +155,8 @@ class HairstyleRecommendationEngine:
             "feasibility_score": feasibility_score,
             "feasibility_status": feasibility_status,
             "feasibility_warning": feasibility_warning,
+            # Achievable with the customer's current hair today; previews are only created for feasible looks
+            "feasible": feasibility_score >= 100.0,
             "chemical_addon": chemical_addon,
             "expert_analysis": {
                 "face_shape": face_shape,
@@ -186,7 +207,7 @@ class HairstyleRecommendationEngine:
                 if style.get("service", "Hair") == service and self._in_collection(style, user_gender)
             ]
             scored.sort(key=lambda x: x["score"], reverse=True)
-            usable = [x["style"] for x in scored if x["score"] > -50.0]
+            usable = [x["style"] for x in scored if x["score"] > -100.0]
             in_category = [s for s in usable if s.get("category", "").lower() == wanted]
             ranked[service] = in_category + [s for s in usable if s.get("category", "").lower() != wanted]
 
@@ -201,6 +222,12 @@ class HairstyleRecommendationEngine:
                 if positions[service] < len(ranked[service]):
                     result.append(ranked[service][positions[service]])
                     positions[service] += 1
+        # A look that is not achievable today names the best achievable look of the same service instead
+        for style in result:
+            if not style.get("feasible", True):
+                service = style.get("service", "Hair")
+                alt = next((s for s in ranked.get(service, []) if s.get("feasible", True) and s["id"] != style["id"]), None)
+                style["suggested_alternative"] = {"id": alt["id"], "name": alt["name"]} if alt else None
         return result
 
 

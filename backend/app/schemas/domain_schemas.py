@@ -59,6 +59,8 @@ class StyleItem(BaseModel):
     service: str = "Hair"                      # Hair, Beard, Colour or Texture
     feasibility_status: Optional[str] = None
     feasibility_warning: Optional[str] = None
+    feasible: bool = True                      # achievable with the customer's current hair today
+    suggested_alternative: Optional[Dict[str, Any]] = None
     chemical_addon: Optional[Dict[str, Any]] = None
     expert_analysis: Optional[Dict[str, Any]] = None
 
@@ -97,6 +99,7 @@ class SelectionRequest(BaseModel):
     hairstyle_id: Optional[int] = None
     beard_style_id: Optional[int] = None
     reference_image_url: str
+    recommendation_id: Optional[int] = None  # links the selection to its photo session (front/side/back)
 
 class SelectionResponse(BaseModel):
     selection_id: int

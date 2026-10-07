@@ -1,22 +1,27 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Share2, Award, Copy, Check } from 'lucide-react';
-import { getCustomerHistory, getShareLink, PUBLIC_APP_URL } from '../../api/client';
+import { getShareLink, PUBLIC_APP_URL } from '../../api/client';
+import { CustomerFullProfile, type RepeatableStyle } from '../../components/CustomerFullProfile';
+import { preparePreviousStyle } from '../../utils/previousStyle';
 import { currentCustomerId } from '../../auth/session';
 
 export const CustomerHistoryPage: React.FC = () => {
-  const [history, setHistory] = useState<any>(null);
+  const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
   const [share, setShare] = useState<{ referral_code: string; share_path: string; discount_percent: number; salon_name: string } | null>(null);
 
   useEffect(() => {
     const customerId = currentCustomerId();
-    getCustomerHistory(customerId)
-      .then((res) => setHistory(res))
-      .catch((err) => console.error(err));
     getShareLink(customerId)
       .then(setShare)
       .catch((err) => console.error(err));
   }, []);
+
+  const repeat = async (style: RepeatableStyle) => {
+    await preparePreviousStyle(style, currentCustomerId());
+    navigate('/customer/instructions');
+  };
 
   const shareUrl = share ? `${PUBLIC_APP_URL}${share.share_path}` : '';
   const shareText = share
@@ -38,16 +43,16 @@ export const CustomerHistoryPage: React.FC = () => {
   return (
     <div className="flex-1 space-y-6 py-4">
       {/* Header Banner */}
-      <div className="bg-slate-800/80 p-6 rounded-3xl border border-slate-700/60 backdrop-blur-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="bg-slate-800/80 p-6 rounded-2xl border border-slate-700/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">Customer Style History</h2>
-          <p className="text-slate-400 text-sm">Your saved hairstyle references and salon visit logs</p>
+          <p className="text-slate-400 text-sm">Saved styles, service history and before / AI / after photos</p>
         </div>
 
         <button
           onClick={handleShareWhatsApp}
           disabled={!share}
-          className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-3 rounded-2xl text-sm flex items-center space-x-2 shadow-lg shadow-emerald-600/20 touch-target-large active:scale-95"
+          className="bg-emerald-600 hover:bg-emerald-700 text-slate-950 font-bold px-5 py-3 rounded-2xl text-sm flex items-center space-x-2 shadow-sm touch-target-large active:scale-95"
         >
           <Share2 className="w-5 h-5" />
           <span>Share via WhatsApp</span>
@@ -55,7 +60,7 @@ export const CustomerHistoryPage: React.FC = () => {
       </div>
 
       {/* Referral Link Card */}
-      <div className="bg-gradient-to-r from-amber-500/10 to-purple-500/10 border border-amber-500/20 p-5 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="bg-amber-50 border border-amber-500/20 p-5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="flex items-center space-x-4">
           <div className="w-12 h-12 rounded-2xl bg-amber-500 text-slate-950 font-bold flex items-center justify-center">
             <Award className="w-7 h-7" />
@@ -75,28 +80,7 @@ export const CustomerHistoryPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Style History Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-        <div className="bg-slate-800/60 border border-slate-700/60 p-5 rounded-3xl space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Latest Selected Style</span>
-            <span className="text-xs text-slate-400">{history?.selections?.[0]?.date || 'Recent Visit'}</span>
-          </div>
-          <div className="rounded-2xl overflow-hidden aspect-[4/5] bg-slate-950 border border-slate-700">
-            <img
-              src={history?.selections?.[0]?.reference_image_url || localStorage.getItem('salon_original_image_url') || ''}
-              alt="Style"
-              className="w-full h-full object-cover"
-            />
-          </div>
-          <div className="pt-1">
-            <h4 className="font-bold text-white text-base">
-              {JSON.parse(localStorage.getItem('salon_selected_style') || '{}')?.name || 'Personalized Hairstyle'}
-            </h4>
-            <p className="text-xs text-slate-400 mt-1">Customer: {history?.full_name || 'Valued Client'} • Verified Session</p>
-          </div>
-        </div>
-      </div>
+      <CustomerFullProfile customerId={currentCustomerId()} onRepeat={repeat} initialTab="services" />
 
     </div>
   );

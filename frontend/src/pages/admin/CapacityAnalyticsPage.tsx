@@ -13,9 +13,9 @@ export const CapacityAnalyticsPage: React.FC = () => {
   }, []);
 
   const getCellColor = (utilization: number) => {
-    if (utilization >= 80) return 'bg-rose-500/80 border-rose-400/50 text-white font-bold';
+    if (utilization >= 80) return 'bg-rose-500/80 border-rose-400/50 text-slate-950 font-bold';
     if (utilization >= 60) return 'bg-amber-500/70 border-amber-400/50 text-slate-950 font-bold';
-    if (utilization >= 40) return 'bg-emerald-500/50 border-emerald-400/30 text-white';
+    if (utilization >= 40) return 'bg-emerald-500/50 border-emerald-400/30 text-slate-950';
     return 'bg-slate-900 border-slate-800 text-slate-500';
   };
 
@@ -47,7 +47,7 @@ export const CapacityAnalyticsPage: React.FC = () => {
       </div>
 
       {/* Day vs Hour Heatmap Matrix */}
-      <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-3xl overflow-x-auto">
+      <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl overflow-x-auto">
         <table className="w-full text-center border-collapse min-w-[700px]">
           <thead>
             <tr>

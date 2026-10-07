@@ -1,9 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Phone, Lock, ArrowRight, UserCheck, Sparkles, RefreshCw, Scissors, User, ShieldCheck, Eye, EyeOff } from 'lucide-react';
-import { customerLogin, customerRegister, getCustomerSummary, type CustomerLoginResult } from '../../api/client';
+import { customerLogin, customerRegister, getCustomerHistory, getCustomerSummary, type CustomerHistory, type CustomerLoginResult } from '../../api/client';
+import { LatestLookCard, PreviousStylesStrip } from '../../components/CustomerFullProfile';
+import { applyPreviousPhotoSession, continueTarget } from '../../utils/continueStyle';
 import { clearCustomerContext, getSession, isStaff, saveSession } from '../../auth/session';
 import { preparePreviousStyle } from '../../utils/previousStyle';
+import { BRAND } from '../../config/brand';
+import { workBranchId } from '../../utils/workBranch';
 import {
   authCard, authContainer, authError, authEyeButton, authFooterLink, authHint, authIconBadge, authInput,
   authLabel, authPasswordInput, authPrimaryButton, authSubtitle, authTitle,
@@ -38,6 +42,8 @@ export const CustomerLoginPage: React.FC = () => {
   // Shown only while a customer is logged in: after Logout this page must show the login form again
   const loggedInCustomerId = session?.kind === 'customer' ? session.customerId ?? null : null;
   const summary = loggedInCustomerId ? storedSummary : null;
+  const [history, setHistory] = useState<CustomerHistory | null>(null);
+  const target = continueTarget(history, summary?.previous_style);
 
   // Always refresh from the server so the latest chosen style shows (not the copy saved at login)
   useEffect(() => {
@@ -50,6 +56,9 @@ export const CustomerLoginPage: React.FC = () => {
         localStorage.setItem('salon_customer_summary', JSON.stringify(res.customer));
       })
       .catch((err) => console.error('Could not refresh customer details:', err));
+    getCustomerHistory(loggedInCustomerId)
+      .then((h) => { if (active) setHistory(h); })
+      .catch((err) => console.error('Could not load previous styles:', err));
     return () => { active = false; };
   }, [loggedInCustomerId]);
 
@@ -85,7 +94,7 @@ export const CustomerLoginPage: React.FC = () => {
     setError(null);
     try {
       const referralCode = localStorage.getItem('salon_referral_code') || undefined;
-      const res = await customerRegister({ full_name: fullName, phone_number: phone, password: newPassword, gender, referral_code: referralCode });
+      const res = await customerRegister({ full_name: fullName, phone_number: phone, password: newPassword, gender, referral_code: referralCode, branch_id: workBranchId() });
       localStorage.removeItem('salon_referral_code');
       startSession(res);
       navigate('/customer/photo');
@@ -100,11 +109,11 @@ export const CustomerLoginPage: React.FC = () => {
   if (isStaff(session)) {
     return (
       <div className="flex-1 flex items-center justify-center py-6 px-4">
-        <div className="w-full bg-slate-800/80 border border-slate-700/60 rounded-3xl p-8 text-center space-y-4">
+        <div className="w-full bg-slate-800/80 border border-slate-700/60 rounded-2xl p-8 text-center space-y-4">
           <ShieldCheck className="w-10 h-10 text-amber-400 mx-auto" />
           <h2 className="text-xl font-bold text-white">Signed in as salon staff ({session?.name})</h2>
           <p className="text-sm text-slate-400">Pick the customer you are serving from the customer directory.</p>
-          <button onClick={() => navigate('/stylist/customers')} className="w-full min-h-[48px] rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold">
+          <button onClick={() => navigate('/stylist/customers')} className="w-full min-h-[48px] rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold">
             Open Customer Directory
           </button>
         </div>
@@ -121,7 +130,7 @@ export const CustomerLoginPage: React.FC = () => {
               <Scissors className="w-8 h-8" />
             </div>
             <h2 className={authTitle}>
-              {summary ? `Welcome back, ${summary.full_name.split(' ')[0]}` : 'Welcome to Salon AI'}
+              {summary ? `Welcome back, ${summary.full_name.split(' ')[0]}` : `Welcome to ${BRAND.name}`}
             </h2>
             <p className={authSubtitle}>
               {summary ? 'Continue your last look or create a new one' : 'Log in to start your personalized style session'}
@@ -138,39 +147,41 @@ export const CustomerLoginPage: React.FC = () => {
                 <div>
                   <h3 className="font-bold text-lg text-white">{summary.full_name}</h3>
                   <p className="text-xs text-amber-400 font-semibold">
-                    {summary.customer_code} • {summary.segment_name} • {summary.total_visits} Visits
+                    {summary.customer_code} • {summary.customer_type ? `${summary.customer_type} Client` : summary.segment_name} • {summary.total_visits} Visits
                   </p>
                 </div>
               </div>
 
-              {summary.previous_style?.reference_image_url && (
-                <div className="bg-slate-900/80 rounded-2xl p-4 border border-slate-700/50">
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Your Previous Hairstyle</p>
-                  <div className="relative mx-auto h-72 sm:h-80 aspect-[4/5] max-w-full rounded-2xl overflow-hidden bg-slate-950 border border-slate-700/60">
-                    <img src={summary.previous_style.reference_image_url} alt="Previous Style" className="w-full h-full object-contain" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/20 to-transparent flex items-end p-3">
-                      <span className="text-xs font-bold text-amber-300">{summary.previous_style?.hairstyle_name || 'Previous Selected Hairstyle'}</span>
-                    </div>
-                  </div>
+              <LatestLookCard history={history} />
+
+              {history && (
+                <div className="bg-slate-900/70 rounded-2xl p-4 border border-slate-700/60 space-y-3">
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Previously Selected Styles</p>
+                  <PreviousStylesStrip history={history} limit={4}
+                    onRepeat={async (style) => { await preparePreviousStyle(style, summary.id); navigate('/customer/instructions'); }} />
                 </div>
               )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {summary.previous_style?.reference_image_url && (
-                  <button
-                    onClick={async () => { await preparePreviousStyle(summary.previous_style); navigate('/customer/instructions'); }}
-                    className="p-4 rounded-2xl bg-slate-700 hover:bg-slate-600 border border-slate-600 text-white font-bold text-center flex flex-col items-center justify-center space-y-2 touch-target-large active:scale-95 transition-all"
-                  >
-                    <UserCheck className="w-6 h-6 text-amber-400" />
-                    <span>Continue Previous Style</span>
-                  </button>
-                )}
+                <button
+                  onClick={async () => {
+                    if (target.kind === 'style') { await preparePreviousStyle(target.style, summary.id); navigate('/customer/instructions'); }
+                    else if (target.kind === 'photo') { applyPreviousPhotoSession(target.photo); navigate('/customer/service'); }
+                  }}
+                  disabled={target.kind === 'none'}
+                  className="p-4 rounded-2xl bg-slate-700 hover:bg-slate-600 border border-slate-600 text-white font-bold text-center flex flex-col items-center justify-center gap-1 touch-target-large active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <UserCheck className="w-6 h-6 text-amber-400" />
+                  <span>Continue Previous Style</span>
+                  <span className="text-[11px] font-medium text-slate-300 line-clamp-2">{target.hint}</span>
+                </button>
                 <button
                   onClick={() => navigate('/customer/photo')}
-                  className={`p-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-center flex flex-col items-center justify-center space-y-2 touch-target-large active:scale-95 transition-all shadow-lg shadow-amber-500/20 ${summary.previous_style?.reference_image_url ? '' : 'sm:col-span-2'}`}
+                  className="p-4 rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-center flex flex-col items-center justify-center gap-1 touch-target-large active:scale-95 transition-all shadow-sm"
                 >
                   <Sparkles className="w-6 h-6 text-slate-950" />
                   <span>Generate New Style</span>
+                  <span className="text-[11px] font-medium text-slate-800">New photos & new looks</span>
                 </button>
               </div>
             </div>
@@ -264,7 +275,7 @@ export const CustomerLoginPage: React.FC = () => {
                     ))}
                   </div>
                   <button type="submit" disabled={loading}
-                    className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-4 rounded-2xl text-base shadow-lg active:scale-95 transition-all touch-target-large disabled:opacity-60">
+                    className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-4 rounded-2xl text-base shadow-sm active:scale-95 transition-all touch-target-large disabled:opacity-60">
                     {loading ? 'Creating your profile...' : 'Register & Take Photo'}
                   </button>
                 </form>

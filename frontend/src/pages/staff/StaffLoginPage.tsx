@@ -40,11 +40,11 @@ export const StaffLoginPage: React.FC = () => {
   // Same page frame and card as the customer login (CustomerLayout + CustomerLoginPage)
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-900">
-      <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+      <header className="sticky top-0 z-40 bg-slate-900/90 border-b border-slate-800 px-4 py-3 flex items-center justify-between">
         <BrandLogo onClick={() => navigate('/customer/login')} />
       </header>
 
-      <main className="flex-1 max-w-3xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col">
+      <main className="flex-1 max-w-3xl lg:max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col">
         <div className="flex-1 flex flex-col items-center justify-center py-6 px-4">
           <div className={authContainer}>
             <div className={authCard}>

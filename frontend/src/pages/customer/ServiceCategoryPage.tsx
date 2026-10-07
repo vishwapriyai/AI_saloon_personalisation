@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Scissors, Sparkles, User, ArrowRight, Palette, Check } from 'lucide-react';
+import { Scissors, Sparkles, User, ArrowRight, Palette, Check, Wind } from 'lucide-react';
 import { getRecommendations, getLastPreferences } from '../../api/client';
 import { currentCustomerId } from '../../auth/session';
+import { HairAnalysisCard } from '../../components/HairAnalysisCard';
 
 export const ServiceCategoryPage: React.FC = () => {
   const navigate = useNavigate();
@@ -40,10 +41,10 @@ export const ServiceCategoryPage: React.FC = () => {
   ];
 
   const services = [
-    { id: 'Hair', title: 'Hair Cut & Styling', icon: Scissors, desc: 'Bobs, layers, fades, crops & tops' },
-    { id: 'Colour / Balayage', title: 'Colour & Balayage', icon: Palette, desc: 'Highlights, balayage, glossing & roots' },
-    { id: 'Keratin / Smoothening', title: 'Smoothening & Perms', icon: Sparkles, desc: 'Keratin treatment & texture perms' },
-    { id: 'Beard', title: 'Beard Grooming', icon: User, desc: 'Trimming, sculpting & beard lining' },
+    { id: 'Hair', title: 'Haircut & Hairstyle', icon: Scissors, desc: 'Bobs, layers, fades, crops & tops' },
+    { id: 'Colour / Balayage', title: 'Hair Colour', icon: Palette, desc: 'Highlights, balayage, glossing & roots' },
+    { id: 'Keratin / Smoothening', title: 'Smoothening & Perms', icon: Wind, desc: 'Keratin treatment & texture perms' },
+    { id: 'Beard', title: 'Beard & Grooming', icon: User, desc: 'Trimming, sculpting & beard lining' },
   ];
 
   const categories = [
@@ -110,6 +111,8 @@ export const ServiceCategoryPage: React.FC = () => {
           )}
         </div>
 
+        <HairAnalysisCard showBeard={selectedGender !== 'Women'} />
+
         {/* Style Collection Selection (Women's / Men's / All) */}
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">1. Select Style Collection</h3>
@@ -122,7 +125,7 @@ export const ServiceCategoryPage: React.FC = () => {
                   onClick={() => setSelectedGender(col.id as any)}
                   className={`p-4 rounded-2xl text-left border transition-all touch-target-large active:scale-95 ${
                     isSelected
-                      ? 'bg-amber-500/10 border-amber-500 text-white ring-2 ring-amber-500/30 shadow-lg'
+                      ? 'bg-amber-500/10 border-amber-500 text-white ring-2 ring-amber-500/30 shadow-sm'
                       : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800'
                   }`}
                 >
@@ -157,14 +160,14 @@ export const ServiceCategoryPage: React.FC = () => {
                   title={disabled ? "Beard grooming is in the Men's collection" : undefined}
                   className={`p-4 rounded-2xl text-left border transition-all flex flex-col justify-between touch-target-large active:scale-95 relative disabled:opacity-40 disabled:cursor-not-allowed ${
                     isSelected
-                      ? 'bg-amber-500/10 border-amber-500 text-white ring-2 ring-amber-500/30 shadow-lg shadow-amber-500/10'
+                      ? 'bg-amber-500/10 border-amber-500 text-white ring-2 ring-amber-500/30 shadow-sm'
                       : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-3">
                     <Icon className={`w-7 h-7 ${isSelected ? 'text-amber-400' : 'text-slate-400'}`} />
                     {isSelected && (
-                      <div className="w-5 h-5 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shadow-md">
+                      <div className="w-5 h-5 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shadow-sm">
                         <Check className="w-3.5 h-3.5 stroke-[3]" />
                       </div>
                     )}
@@ -191,7 +194,7 @@ export const ServiceCategoryPage: React.FC = () => {
                   onClick={() => setSelectedCategory(cat.id as any)}
                   className={`p-4 rounded-2xl text-left border transition-all touch-target-large active:scale-95 ${
                     isSelected
-                      ? 'bg-amber-500/10 border-amber-500 text-white ring-2 ring-amber-500/30 shadow-lg shadow-amber-500/10'
+                      ? 'bg-amber-500/10 border-amber-500 text-white ring-2 ring-amber-500/30 shadow-sm'
                       : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800'
                   }`}
                 >
@@ -206,7 +209,7 @@ export const ServiceCategoryPage: React.FC = () => {
         <button
           onClick={handleGenerate}
           disabled={loading}
-          className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold py-4 rounded-2xl text-lg shadow-lg shadow-amber-500/25 active:scale-[0.98] transition-all flex items-center justify-center space-x-2 touch-target-large"
+          className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-4 rounded-2xl text-lg shadow-sm active:scale-[0.98] transition-all flex items-center justify-center space-x-2 touch-target-large"
         >
           <Sparkles className="w-6 h-6 text-slate-950" />
           <span>Generate My 4 Personalized Looks</span>

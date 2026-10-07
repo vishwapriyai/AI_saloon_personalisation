@@ -34,7 +34,7 @@ export const SharedReferralPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-4 py-8">
-      <div className="w-full max-w-3xl bg-slate-900/80 border border-slate-700/60 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 text-center">
+      <div className="w-full max-w-3xl lg:max-w-5xl bg-slate-900/80 border border-slate-700/60 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6 text-center">
         <div className="flex items-center justify-center gap-3">
           <div className="w-11 h-11 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center">
             <Scissors className="w-6 h-6" />
@@ -75,7 +75,7 @@ export const SharedReferralPage: React.FC = () => {
 
             <button
               onClick={handleClaim}
-              className="w-full min-h-[48px] rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-base flex items-center justify-center gap-2"
+              className="w-full min-h-[48px] rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-base flex items-center justify-center gap-2"
             >
               Get my personalized look
               <ArrowRight className="w-5 h-5" />

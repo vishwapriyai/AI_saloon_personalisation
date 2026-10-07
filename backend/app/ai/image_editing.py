@@ -301,7 +301,7 @@ def validate_edit(src: SourcePhoto, edited_rgb: np.ndarray, colour_change_allowe
     if _added_forehead_mark(src, edited_rgb, face, mask):
         return Validation("something was added to the face (forehead mark)", identity)
 
-    if mask.sum() < 0.05 * face.width ** 2:
+    if mask.sum() < 0.05 * face.width ** 2 and src.hair_mask.sum() >= 0.05 * face.width ** 2:
         return Validation("hair missing in the edited photo", identity)
 
     aligned = cv2.warpAffine(src.rgb, M, (w, h), flags=cv2.INTER_LINEAR)
@@ -329,12 +329,13 @@ class GeminiEditor:
 
     def __init__(self):
         from google import genai  # imported lazily so the app starts without the key
-        self._keys = settings.get_gemini_api_keys()
-        if not self._keys:
+        key = settings.get_gemini_api_key()
+        if not key:
             raise ImageEditError("No GEMINI_API_KEY found in backend/.env")
-        self._key_index = 0
-        self._clients = [genai.Client(api_key=k) for k in self._keys]
-        log_progress("GEMINI-INIT", f"Initialized Gemini Editor with Pool of {len(self._keys)} API Key(s)", "INFO")
+        self._key = key
+        self._client = genai.Client(api_key=key)
+        masked = key[:6] + "..." + key[-4:] if len(key) > 10 else "***"
+        log_progress("GEMINI-INIT", f"Initialized Gemini Editor with single API Key ({masked})", "INFO")
 
     max_prompt_chars = None
 
@@ -344,96 +345,68 @@ class GeminiEditor:
     def supports_reference(self, tier: str) -> bool:
         return True
 
-    def _get_current_client(self):
-        idx = self._key_index % len(self._keys)
-        return self._clients[idx], self._keys[idx], idx + 1
-
-    def _rotate_key(self):
-        old_idx = (self._key_index % len(self._keys)) + 1
-        self._key_index += 1
-        new_idx = (self._key_index % len(self._keys)) + 1
-        new_key = self._keys[self._key_index % len(self._keys)]
-        masked = new_key[:6] + "..." + new_key[-4:] if len(new_key) > 10 else "***"
-        log_progress("KEY-ROTATION", f"Switched from Gemini Key #{old_idx} to Key #{new_idx} ({masked})", "WARNING")
-
     async def edit_image(self, tier: str, prompt: str, photo: bytes, reference: Optional[bytes],
                          usage: Optional[Dict[str, Any]] = None) -> bytes:
         from google.genai import types
         from google.genai.errors import APIError
 
         model_name = self.model_for(tier)
-        num_keys = len(self._keys)
+        masked_key = self._key[:6] + "..." + self._key[-4:] if len(self._key) > 10 else "***"
 
         contents: list[Any] = [types.Part.from_bytes(data=photo, mime_type="image/jpeg")]
         if reference:
             contents.append(types.Part.from_bytes(data=reference, mime_type="image/jpeg"))
         contents.append(prompt)
 
-        for attempt_key in range(num_keys):
-            client, key_str, key_num = self._get_current_client()
-            masked_key = key_str[:6] + "..." + key_str[-4:] if len(key_str) > 10 else "***"
-            log_progress("GEMINI-REQUEST", f"Sending request using Key #{key_num}/{num_keys} ({masked_key}) to '{model_name}'...")
+        log_progress("GEMINI-REQUEST", f"Sending request using Single Key ({masked_key}) to '{model_name}'...")
 
-            try:
-                resp = await client.aio.models.generate_content(
+        try:
+            resp = await self._client.aio.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
+            )
+            for cand in resp.candidates or []:
+                for part in (cand.content.parts if cand.content else []) or []:
+                    if part.inline_data and part.inline_data.data:
+                        log_progress("GEMINI-SUCCESS", f"Successfully generated image using Single Key ({masked_key})!", "SUCCESS")
+                        if usage is not None and resp.usage_metadata:
+                            um = resp.usage_metadata
+                            usage["input_tokens"] = um.prompt_token_count or 0
+                            usage["output_tokens"] = um.candidates_token_count or 0
+                            usage["total_tokens"] = um.total_token_count or (usage["input_tokens"] + usage["output_tokens"])
+                            price = _token_price(model_name)
+                            if price:
+                                usage["cost_usd"] = (usage["input_tokens"] * price[0] + usage["output_tokens"] * price[1]) / 1e6
+                        return part.inline_data.data
+            reason = resp.candidates[0].finish_reason if resp.candidates else getattr(resp, "prompt_feedback", None)
+            raise ImageEditError(f"Gemini returned no image (reason: {reason})")
+
+        except APIError as e:
+            is_rate_limit = (e.code == 429 or "RESOURCE_EXHAUSTED" in str(e).upper() or "QUOTA" in str(e).upper())
+            if is_rate_limit:
+                log_api_exceeded_warning(
+                    provider=f"Gemini (Key: {masked_key})",
                     model=model_name,
-                    contents=contents,
-                    config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
+                    error_msg=f"HTTP 429 Rate Limit / Quota Exceeded ({e.message})",
+                    hint="Gemini API Key quota limit reached. Please check quota or wait for reset."
                 )
-                for cand in resp.candidates or []:
-                    for part in (cand.content.parts if cand.content else []) or []:
-                        if part.inline_data and part.inline_data.data:
-                            log_progress("GEMINI-SUCCESS", f"Successfully generated image using Key #{key_num} ({masked_key})!", "SUCCESS")
-                            if usage is not None and resp.usage_metadata:
-                                um = resp.usage_metadata
-                                usage["input_tokens"] = um.prompt_token_count or 0
-                                usage["output_tokens"] = um.candidates_token_count or 0
-                                usage["total_tokens"] = um.total_token_count or (usage["input_tokens"] + usage["output_tokens"])
-                                price = _token_price(model_name)
-                                if price:
-                                    usage["cost_usd"] = (usage["input_tokens"] * price[0] + usage["output_tokens"] * price[1]) / 1e6
-                            return part.inline_data.data
-                reason = resp.candidates[0].finish_reason if resp.candidates else getattr(resp, "prompt_feedback", None)
-                raise ImageEditError(f"Gemini returned no image (reason: {reason})")
-
-            except APIError as e:
-                is_rate_limit = (e.code == 429 or "RESOURCE_EXHAUSTED" in str(e).upper() or "QUOTA" in str(e).upper())
-                if is_rate_limit:
-                    log_api_exceeded_warning(
-                        provider=f"Gemini (Key #{key_num}/{num_keys}: {masked_key})",
-                        model=model_name,
-                        error_msg=f"HTTP 429 Rate Limit / Quota Exceeded ({e.message})",
-                        hint=f"Key #{key_num} quota limit reached. Rotating to next key..."
-                    )
-                    if attempt_key < num_keys - 1:
-                        self._rotate_key()
-                        continue
-                    else:
-                        raise ImageEditError("ALL Gemini API Keys in pool hit rate limits. Please add billing or wait for quota reset.")
-                else:
-                    log_api_exceeded_warning(f"Gemini (Key #{key_num})", model_name, f"HTTP {e.code}: {e.message}")
-                    if attempt_key < num_keys - 1:
-                        self._rotate_key()
-                        continue
-                    raise ImageEditError(f"Gemini API error {e.code}: {e.message}")
-            except Exception as e:
-                err_str = str(e)
-                is_rate_limit = ("429" in err_str or "RESOURCE_EXHAUSTED" in err_str.upper() or "QUOTA" in err_str.upper())
-                if is_rate_limit:
-                    log_api_exceeded_warning(
-                        provider=f"Gemini (Key #{key_num}/{num_keys}: {masked_key})",
-                        model=model_name,
-                        error_msg=f"Quota Exceeded: {err_str}",
-                        hint=f"Key #{key_num} rate limit hit. Rotating to next key..."
-                    )
-                    if attempt_key < num_keys - 1:
-                        self._rotate_key()
-                        continue
-                    else:
-                        raise ImageEditError("ALL Gemini API Keys in pool hit rate limits.")
-                raise ImageEditError(f"Gemini error: {err_str}")
-
-        raise ImageEditError("Failed to generate image after trying all Gemini API keys in pool.")
+                raise ImageEditError("Gemini API Key hit rate limits / quota exceeded.")
+            else:
+                log_api_exceeded_warning(f"Gemini (Key: {masked_key})", model_name, f"HTTP {e.code}: {e.message}")
+                raise ImageEditError(f"Gemini API error {e.code}: {e.message}")
+        except Exception as e:
+            err_str = str(e)
+            is_rate_limit = ("429" in err_str or "RESOURCE_EXHAUSTED" in err_str.upper() or "QUOTA" in err_str.upper())
+            if is_rate_limit:
+                log_api_exceeded_warning(
+                    provider=f"Gemini (Key: {masked_key})",
+                    model=model_name,
+                    error_msg=f"Quota Exceeded: {err_str}",
+                    hint="Gemini API Key rate limit hit."
+                )
+                raise ImageEditError("Gemini API Key hit rate limit.")
+            raise ImageEditError(f"Gemini error: {err_str}")
 
 
 class CloudflareEditor:
@@ -744,14 +717,39 @@ class HairStyleGenerator:
         total["tokens"] += usage.get("total_tokens") or 0
         total["neurons"] += usage.get("neurons") or 0.0
         total["cost_usd"] += usage.get("cost_usd") or 0.0
-        log_progress("TOKENS", f"Style #{style_id} attempt {attempt} | {model} | {_usage_line(usage)}", "INFO")
-        parts = [f"{total['calls']} call(s)"]
-        if total["tokens"]:
-            parts.append(f"{total['tokens']:,} tokens")
-        if total["neurons"]:
-            parts.append(f"~{total['neurons']:,.0f} neurons")
-        parts.append(f"~${total['cost_usd']:.4f}")
-        log_progress("TOKENS-PHOTO-TOTAL", f"{photo_url.rsplit('/', 1)[-1]}: " + " | ".join(parts), "INFO")
+
+        cyan = "\033[96m"
+        bold = "\033[1m"
+        reset = "\033[0m"
+
+        in_tok = usage.get("input_tokens", 0)
+        out_tok = usage.get("output_tokens", 0)
+        tot_tok = usage.get("total_tokens", 0)
+        call_cost = usage.get("cost_usd", 0.0)
+
+        border = "----------------------------------------------------------------------"
+        token_box = (
+            f"\n{cyan}{bold}{border}\n"
+            f"[GEMINI API TOKEN USAGE SUMMARY]\n"
+            f"Style Target : Style #{style_id} (Attempt #{attempt})\n"
+            f"Model Used   : {model}\n"
+            f"Input Tokens : {in_tok:,}\n"
+            f"Output Tokens: {out_tok:,}\n"
+            f"Total Tokens : {tot_tok:,}\n"
+            f"Est. Call Cost: ${call_cost:.5f} USD\n"
+            f"--- SESSION ACCUMULATED TOTAL FOR PHOTO ({photo_url.rsplit('/', 1)[-1]}) ---\n"
+            f"Total API Calls  : {total['calls']}\n"
+            f"Total Tokens Used: {total['tokens']:,}\n"
+            f"Total Est. Cost  : ${total['cost_usd']:.5f} USD (~₹{total['cost_usd'] * 85:.2f} INR)\n"
+            f"{border}{reset}\n"
+        )
+        try:
+            print(token_box, flush=True)
+        except Exception:
+            pass
+
+        log_progress("TOKENS", f"Style #{style_id} attempt {attempt} | {model} | Input: {in_tok:,} + Output: {out_tok:,} = Total: {tot_tok:,} tokens (${call_cost:.5f})", "INFO")
+        log_progress("TOKENS-PHOTO-TOTAL", f"{photo_url.rsplit('/', 1)[-1]}: Calls={total['calls']} | Cumulative Tokens={total['tokens']:,} | Total Cost=${total['cost_usd']:.5f}", "INFO")
 
     def _save(self, jpeg: bytes, style_id: Any) -> str:
         _, url = storage_service.save_bytes(jpeg, folder="generated", filename_prefix=f"gen_style_{style_id}")
@@ -870,6 +868,69 @@ class HairStyleGenerator:
         raise ImageEditError(last.problem or "generation failed", attempts=attempts,
                              identity_score=last.identity_score,
                              hair_consistency_score=last.hair_consistency_score, model=model)
+
+    async def generate_view(
+        self,
+        photo_url: str,
+        style_metadata: Dict[str, Any],
+        customer_analysis: Dict[str, Any],
+        view: str,
+        tier: str = "fast",
+        provider: Optional[str] = None,
+    ) -> EditResult:
+        """
+        Applies the style to the customer's SIDE or BACK photo. These views have no full face to verify,
+        so the checks are: the photo really changed, and (unless it is a colour service) the hair colour
+        stayed the same. The front preview keeps its full identity checks in generate().
+        """
+        started = time.monotonic()
+        style_id = style_metadata.get("id")
+        img = prepare_ai_input(await self._load_bytes(photo_url))
+        img = img.resize((img.width // 16 * 16, img.height // 16 * 16), Image.Resampling.LANCZOS)
+        rgb = np.asarray(img)
+        jpeg = _to_jpeg(img)
+        editor = self._get_editor(provider)
+        model = editor.model_for(tier)
+        vm = get_vision_models()
+        src_hair = await asyncio.to_thread(vm.hair_mask, rgb, None)
+        src_lab = hair_lab(rgb, src_hair)
+        colour_change_allowed = style_metadata.get("service") == "Colour"
+        last_problem = "generation was not attempted"
+        prompt = ""
+        attempts = 0
+        for attempt in range(settings.GENERATION_MAX_ATTEMPTS):
+            attempts = attempt + 1
+            prompt = prompt_engine.build_view_prompt(customer_analysis, style_metadata, view, strict=attempt > 0,
+                                                     max_chars=editor.max_prompt_chars)
+            usage: Dict[str, Any] = {}
+            try:
+                async with self._sem:
+                    raw = await asyncio.wait_for(editor.edit_image(tier, prompt, jpeg, None, usage=usage),
+                                                 timeout=settings.GENERATION_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                last_problem = "the image service took too long to respond"
+                continue
+            except ImageEditError as e:
+                raise ImageEditError(e.reason, attempts=attempts, model=model)
+            self._report_usage(photo_url, f"{style_id}-{view}", attempts, model, usage)
+            edited = np.asarray(_fit_to(Image.open(io.BytesIO(raw)).convert("RGB"), img.size))
+            changed = np.abs(rgb.astype(np.int16) - edited.astype(np.int16)).max(axis=2) > 20
+            if changed.mean() < 0.003:
+                last_problem = "model returned the photo unchanged"
+                continue
+            hair_score = None
+            if src_lab is not None and not colour_change_allowed:
+                edited_lab = hair_lab(edited, await asyncio.to_thread(vm.hair_mask, edited, None))
+                if edited_lab is not None:
+                    de = delta_e(src_lab, edited_lab)
+                    hair_score = float(np.clip(1.0 - de / 40.0, 0.0, 1.0))
+                    if de > settings.HAIR_COLOUR_MAX_DELTA_E:
+                        last_problem = f"hair colour changed (deltaE {de:.1f})"
+                        continue
+            url = self._save(_to_jpeg(add_preview_label(Image.fromarray(edited))), f"{style_id}_{view}")
+            log_progress("VIEW-SUCCESS", f"Style #{style_id} {view} view generated -> {url}", "SUCCESS")
+            return EditResult(url, model, prompt, None, hair_score, attempts, round(time.monotonic() - started, 2))
+        raise ImageEditError(last_problem, attempts=attempts, model=model)
 
 
 hair_style_generator = HairStyleGenerator()

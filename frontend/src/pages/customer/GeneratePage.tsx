@@ -30,17 +30,17 @@ export const GeneratePage: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center py-12">
-      <div className="w-full bg-slate-800/80 border border-slate-700/60 rounded-3xl p-8 shadow-2xl text-center backdrop-blur-xl space-y-6">
+      <div className="w-full bg-slate-800/80 border border-slate-700/60 rounded-2xl p-8 shadow-sm text-center space-y-6">
         <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
-          <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-amber-500 to-amber-300 animate-spin opacity-30 blur-md"></div>
-          <div className="w-20 h-20 rounded-full bg-slate-900 border-2 border-amber-500/50 flex items-center justify-center text-amber-400 relative z-10 shadow-lg">
+          <div className="absolute inset-0 rounded-full bg-amber-500 animate-spin opacity-30 blur-md"></div>
+          <div className="w-20 h-20 rounded-full bg-slate-900 border-2 border-amber-500/50 flex items-center justify-center text-amber-400 relative z-10 shadow-sm">
             <Sparkles className="w-10 h-10 animate-pulse" />
           </div>
         </div>
 
         <div>
           <span className="text-xs px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 font-semibold border border-amber-500/30">
-            AI IMAGE EDITING • YOUR OWN PHOTO
+            PREPARING YOUR LOOKS
           </span>
           <h2 className="text-2xl font-bold text-white tracking-tight mt-3">Styling Your Photo in {total} Looks</h2>
           <p className="text-sm text-slate-400 mt-1">{statusText}</p>
@@ -54,7 +54,7 @@ export const GeneratePage: React.FC = () => {
           </div>
           <div className="w-full bg-slate-900 rounded-full h-3.5 p-0.5 border border-slate-700">
             <div
-              className="bg-gradient-to-r from-amber-500 to-amber-400 h-full rounded-full transition-all duration-300 shadow-md shadow-amber-500/30"
+              className="bg-amber-500 h-full rounded-full transition-all duration-300 shadow-sm"
               style={{ width: `${(progress / Math.max(total, 1)) * 100}%` }}
             ></div>
           </div>

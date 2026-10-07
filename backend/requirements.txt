@@ -22,3 +22,4 @@ google-genai>=1.30.0
 mediapipe>=0.10.14
 gradio_client>=2.0
 pillow-heif>=0.18.0,<0.19  # HEIC/AVIF phone photos; 0.19+ needs Pillow 11
+edge-tts>=7.0  # spoken cutting instructions (English / Hindi / Tamil)

@@ -28,7 +28,7 @@ export const CampaignsPage: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Discount Optimization Test Tool */}
-        <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-3xl space-y-5">
+        <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl space-y-5">
           <div className="flex items-center space-x-2">
             <Tag className="w-5 h-5 text-amber-400" />
             <h3 className="font-bold text-white text-lg">Test Automatic Discount Recommendation</h3>
@@ -52,7 +52,7 @@ export const CampaignsPage: React.FC = () => {
           <button
             onClick={handleCalculateOffer}
             disabled={loading}
-            className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-3.5 rounded-xl text-sm shadow-lg shadow-amber-500/20 active:scale-95 transition-all flex items-center justify-center space-x-2 touch-target-large"
+            className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-3.5 rounded-xl text-sm shadow-sm active:scale-95 transition-all flex items-center justify-center space-x-2 touch-target-large"
           >
             {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
             <span>Calculate Automated Discount & Generate Coupon</span>
@@ -61,7 +61,7 @@ export const CampaignsPage: React.FC = () => {
 
         {/* Calculated Coupon Result Display */}
         {offerResult && (
-          <div className="bg-slate-900/80 border border-amber-500/40 p-6 rounded-3xl space-y-4 shadow-xl">
+          <div className="bg-slate-900/80 border border-amber-500/40 p-6 rounded-2xl space-y-4 shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Engine Calculation Result</span>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold">

@@ -21,7 +21,7 @@ export const StylistLayout: React.FC = () => {
         <div className="flex items-center gap-4 min-w-0">
           <div className="flex items-center space-x-2 flex-shrink-0">
             <Scissors className="w-6 h-6 text-amber-400" />
-            <h1 className="font-bold text-white tracking-wide hidden sm:block">STYLIST WORKSTATION</h1>
+            <h1 className="text-lg text-white hidden sm:block">Stylist Workstation</h1>
           </div>
           <nav className="flex items-center gap-1">
             <NavLink to="/stylist/customers" className={tab}>Customers</NavLink>
@@ -49,7 +49,7 @@ export const StylistLayout: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-1 max-w-3xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col">
+      <main className="flex-1 max-w-3xl lg:max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col">
         <Outlet />
       </main>
     </div>

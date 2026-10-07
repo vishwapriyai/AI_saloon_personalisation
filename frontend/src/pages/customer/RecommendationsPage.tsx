@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, ArrowRight, RefreshCw, ImageOff, Sparkles } from 'lucide-react';
-import { saveSelection, generateStyleImages } from '../../api/client';
+import { Check, ArrowRight, RefreshCw, ImageOff, Sparkles, Heart, AlertTriangle } from 'lucide-react';
+import { saveSelection, generateStyleImages, generateSelectionViews, saveFavouriteStyle } from '../../api/client';
 import { currentCustomerId } from '../../auth/session';
 
 const SERVICE_LABELS: Record<string, string> = { Beard: 'Beard', Colour: 'Colour', Texture: 'Smoothening / Perm' };
@@ -24,6 +24,23 @@ export const RecommendationsPage: React.FC = () => {
   const [styles, setStyles] = useState<any[]>([]);
   const [selectedStyleId, setSelectedStyleId] = useState<number | null>(null);
   const [retrying, setRetrying] = useState<Record<number, boolean>>({});
+  const [saved, setSaved] = useState<Record<number, 'saving' | 'saved' | 'error'>>({});
+
+  const handleSaveStyle = async (style: any) => {
+    if (!style.generated_image_url) return;
+    setSaved((s) => ({ ...s, [style.style_id]: 'saving' }));
+    try {
+      await saveFavouriteStyle(currentCustomerId(), {
+        style_id: style.style_id,
+        image_url: style.generated_image_url,
+        recommendation_id: Number(localStorage.getItem('salon_recommendation_id') || 0) || undefined,
+      });
+      setSaved((s) => ({ ...s, [style.style_id]: 'saved' }));
+    } catch (err) {
+      console.error(err);
+      setSaved((s) => ({ ...s, [style.style_id]: 'error' }));
+    }
+  };
   const startedGeneration = useRef(false);
 
   const handleRetry = async (styleId: number) => {
@@ -71,7 +88,7 @@ export const RecommendationsPage: React.FC = () => {
           startedGeneration.current = true;
           localStorage.removeItem('salon_generation_pending');
           merged
-            .filter((s: any) => s.generation_status === 'NOT_GENERATED')
+            .filter((s: any) => s.generation_status === 'NOT_GENERATED' && s.feasible !== false)
             .forEach((s: any) => handleRetry(s.style_id));
         }
         return;
@@ -103,13 +120,17 @@ export const RecommendationsPage: React.FC = () => {
       const res = await saveSelection({
         customer_id: customerId,
         hairstyle_id: selectedStyleId,
-        reference_image_url: chosen?.generated_image_url || ''
+        reference_image_url: chosen?.generated_image_url || '',
+        recommendation_id: Number(localStorage.getItem('salon_recommendation_id') || 0) || undefined,
       });
       localStorage.setItem('salon_selection_id', String(res.selection_id));
       localStorage.setItem('salon_selected_style', JSON.stringify(chosen));
+      // Side/back AI previews are generated in the background; the instructions page shows them when ready
+      generateSelectionViews(res.selection_id).catch((e) => console.warn('Side/back previews unavailable', e));
       navigate('/customer/instructions');
     } catch (err) {
       console.error(err);
+      localStorage.removeItem('salon_selection_id');
       localStorage.setItem('salon_selected_style', JSON.stringify(chosen));
       navigate('/customer/instructions');
     }
@@ -118,7 +139,7 @@ export const RecommendationsPage: React.FC = () => {
   return (
     <div className="flex-1 flex flex-col space-y-6 py-4">
       {/* Page Title */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-800/80 p-5 rounded-3xl border border-slate-700/60 backdrop-blur-xl">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-800/80 p-5 rounded-2xl border border-slate-700/60">
         <div>
           <span className="text-xs px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 font-semibold border border-amber-500/30">
             STEP 3 OF 4: CHOOSE YOUR LOOK
@@ -131,7 +152,7 @@ export const RecommendationsPage: React.FC = () => {
           onClick={handleConfirmSelection}
           disabled={!selectedStyleId || !styles.find((s) => s.style_id === selectedStyleId)?.generated_image_url}
           title="Select a look whose preview is ready"
-          className="disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-6 py-3.5 rounded-2xl text-base shadow-lg shadow-amber-500/25 active:scale-95 transition-all flex items-center justify-center space-x-2 touch-target-large"
+          className="disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-6 py-3.5 rounded-2xl text-base shadow-sm active:scale-95 transition-all flex items-center justify-center space-x-2 touch-target-large"
         >
           <span>Confirm Selection</span>
           <ArrowRight className="w-5 h-5" />
@@ -139,16 +160,16 @@ export const RecommendationsPage: React.FC = () => {
       </div>
 
       {/* Recommended styles: responsive touch grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 md:gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
         {styles.map((style, idx) => {
           const isSelected = selectedStyleId === style.style_id;
           return (
             <div
               key={style.style_id}
               onClick={() => setSelectedStyleId(style.style_id)}
-              className={`group relative bg-slate-800/60 border rounded-3xl overflow-hidden cursor-pointer transition-all duration-200 flex flex-col justify-between touch-target-large active:scale-[0.98] ${
+              className={`group relative bg-slate-800/60 border rounded-2xl overflow-hidden cursor-pointer transition-all duration-200 flex flex-col justify-between touch-target-large active:scale-[0.98] ${
                 isSelected
-                  ? 'border-amber-500 ring-2 ring-amber-500/40 shadow-xl shadow-amber-500/10 bg-slate-800'
+                  ? 'border-amber-500 ring-2 ring-amber-500/40 shadow-sm bg-slate-800'
                   : 'border-slate-700/60 hover:border-slate-500'
               }`}
             >
@@ -161,6 +182,16 @@ export const RecommendationsPage: React.FC = () => {
                     loading="lazy"
                     className="w-full h-full object-contain"
                   />
+                ) : style.feasible === false && !retrying[style.style_id] ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-3 p-4 text-center bg-amber-500/5">
+                    <AlertTriangle className="w-9 h-9 text-amber-400" />
+                    <p className="text-sm font-semibold text-amber-200">Not suitable today</p>
+                    <p className="text-[11px] text-slate-300 line-clamp-5">{style.feasibility_warning}</p>
+                    {style.suggested_alternative && (
+                      <p className="text-[11px] text-emerald-300">Try instead: <b>{style.suggested_alternative.name}</b></p>
+                    )}
+                    <p className="text-[10px] text-slate-500">No preview is made for a look the current hair cannot support.</p>
+                  </div>
                 ) : retrying[style.style_id] ? (
                   <div className="w-full h-full flex flex-col items-center justify-center gap-3 p-4 text-center">
                     <Sparkles className="w-9 h-9 text-amber-400 animate-pulse" />
@@ -177,7 +208,7 @@ export const RecommendationsPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); handleRetry(style.style_id); }}
-                      className="min-h-[44px] px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-sm font-bold flex items-center gap-2"
+                      className="min-h-[44px] px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-sm font-bold flex items-center gap-2"
                     >
                       <RefreshCw className="w-4 h-4" />
                       {style.generation_status === 'NOT_GENERATED' ? 'Create preview' : 'Retry'}
@@ -185,19 +216,35 @@ export const RecommendationsPage: React.FC = () => {
                   </div>
                 )}
 
-                <div className="absolute top-2 left-2 bg-slate-950/80 backdrop-blur-md px-2 py-0.5 rounded-lg text-[11px] font-bold text-amber-400 border border-slate-700">
+                <div className="absolute top-2 left-2 bg-slate-950/80 px-2 py-0.5 rounded-lg text-[11px] font-bold text-amber-400 border border-slate-700">
                   Option #{idx + 1}
                 </div>
 
                 {isSelected && (
-                  <div className="absolute top-2 right-2 w-7 h-7 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shadow-lg">
+                  <div className="absolute top-2 right-2 w-7 h-7 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shadow-sm">
                     <Check className="w-5 h-5 stroke-[3]" />
                   </div>
+                )}
+
+                {style.generated_image_url && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleSaveStyle(style); }}
+                    disabled={saved[style.style_id] === 'saving' || saved[style.style_id] === 'saved'}
+                    className={`absolute bottom-2 right-2 min-h-[40px] px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm ${
+                      saved[style.style_id] === 'saved' ? 'bg-rose-500 text-slate-950' : 'bg-slate-950/80 text-slate-100 border border-slate-600 hover:border-rose-400'
+                    }`}
+                    aria-label={`Save ${style.name}`}
+                  >
+                    {saved[style.style_id] === 'saving' ? <RefreshCw className="w-4 h-4 animate-spin" />
+                      : <Heart className={`w-4 h-4 ${saved[style.style_id] === 'saved' ? 'fill-current' : ''}`} />}
+                    {saved[style.style_id] === 'saved' ? 'Saved' : saved[style.style_id] === 'error' ? 'Retry Save' : 'Save Style'}
+                  </button>
                 )}
               </div>
 
               {/* Style Information & Expert Analysis */}
-              <div className="p-4 md:p-3 flex-1 flex flex-col justify-between space-y-3">
+              <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-1.5">
@@ -214,8 +261,8 @@ export const RecommendationsPage: React.FC = () => {
                       <span className="text-[11px] text-slate-400 font-medium">{style.hair_length}</span>
                     )}
                   </div>
-                  <h3 className="font-bold text-white text-base md:text-sm leading-snug">{style.name}</h3>
-                  {style.feasibility_warning && (
+                  <h3 className="font-bold text-white text-base leading-snug">{style.name}</h3>
+                  {style.feasibility_warning && style.feasible !== false && (
                     <p className="text-[11px] text-amber-300 mt-1">{style.feasibility_warning}</p>
                   )}
                   <p className="text-xs text-slate-400 line-clamp-2 mt-1.5 leading-normal">{style.description}</p>
@@ -232,13 +279,21 @@ export const RecommendationsPage: React.FC = () => {
                   )}
                 </div>
 
-                {/* Expert Analysis Details (InStyle & Man For Himself Rules) */}
+                {/* Why it suits the customer + the stylist's cutting steps */}
                 {style.expert_analysis && (
                   <div className="bg-slate-900/80 rounded-2xl p-2.5 border border-slate-700/60 text-[11px] space-y-1">
-                    <div className="flex items-start space-x-1.5 text-amber-300 font-medium">
-                      <span className="font-bold shrink-0 text-amber-400">Face Match:</span>
-                      <span className="line-clamp-2 text-slate-300">{style.expert_analysis.face_shape_rationale}</span>
-                    </div>
+                    <p className="font-bold text-amber-400">Why it suits you</p>
+                    <p className="line-clamp-3 text-slate-300">{style.expert_analysis.face_shape_rationale}</p>
+                    {style.stylist_instructions && (
+                      <details className="pt-1" onClick={(e) => e.stopPropagation()}>
+                        <summary className="cursor-pointer font-semibold text-slate-300 min-h-[28px] flex items-center">Haircut steps</summary>
+                        <ol className="mt-1 space-y-0.5 list-decimal list-inside text-slate-400">
+                          {String(style.stylist_instructions).split('\n').filter((l: string) => l.trim()).map((l: string, i: number) => (
+                            <li key={i}>{l.replace(/^\d+[.)]\s*/, '')}</li>
+                          ))}
+                        </ol>
+                      </details>
+                    )}
                     {style.chemical_addon && style.chemical_addon.required && (
                       <div className="mt-1 pt-1 border-t border-slate-800 text-amber-400 font-semibold flex items-center justify-between">
                         <span>✨ Add-on: {style.chemical_addon.service_name}</span>

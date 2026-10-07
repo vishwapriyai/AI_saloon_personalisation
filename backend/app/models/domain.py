@@ -55,11 +55,12 @@ class Customer(Base):
     gender: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # Female, Male, Unisex/All
     date_of_birth: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    segment_name: Mapped[str] = mapped_column(String(50), default="Regular Customer")
+    segment_name: Mapped[str] = mapped_column(String(50), default="New Customer")
     total_visits: Mapped[int] = mapped_column(Integer, default=0)
     total_spent: Mapped[float] = mapped_column(Float, default=0.0)
     last_visit_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # customer login
+    home_branch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("branches.id"), nullable=True)  # branch registered at
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class CustomerConsent(Base):
@@ -99,7 +100,9 @@ class CustomerPhoto(Base):
     __tablename__ = "customer_photos"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"))
-    original_image_url: Mapped[str] = mapped_column(String(500))
+    original_image_url: Mapped[str] = mapped_column(String(500))          # front view
+    side_image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    back_image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     face_shape: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     hair_length: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     hair_density: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -236,7 +239,10 @@ class StyleSelection(Base):
     reference_image_url: Mapped[str] = mapped_column(String(500))
     stylist_approved: Mapped[bool] = mapped_column(Boolean, default=True)
     stylist_rejection_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    status: Mapped[str] = mapped_column(String(50), default="CONFIRMED")
+    status: Mapped[str] = mapped_column(String(50), default="CONFIRMED")  # CONFIRMED -> COMPLETED after the service
+    recommendation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("style_recommendations.id"), nullable=True)
+    instruction_language: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # en / hi / ta used for the haircut
+    haircut_confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # stylist started the haircut
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class HaircutInstruction(Base):
@@ -259,6 +265,8 @@ class CustomerVisit(Base):
     total_amount: Mapped[float] = mapped_column(Float)
     discount_amount: Mapped[float] = mapped_column(Float, default=0.0)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    branch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("branches.id"), nullable=True)
+    selection_id: Mapped[Optional[int]] = mapped_column(ForeignKey("style_selections.id"), nullable=True)
 
 class ServiceHistory(Base):
     __tablename__ = "service_history"
@@ -419,3 +427,40 @@ class AuditLog(Base):
     details: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+
+class ServicePhoto(Base):
+    """AI-generated and actual post-haircut photos for a selection, per view (front / side / back)."""
+    __tablename__ = "service_photos"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    selection_id: Mapped[int] = mapped_column(ForeignKey("style_selections.id"), index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"))
+    stage: Mapped[str] = mapped_column(String(20))   # "ai" or "after"
+    view: Mapped[str] = mapped_column(String(10))    # "front", "side" or "back"
+    image_url: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class InstructionTranslation(Base):
+    """Cached translation of a style's cutting steps (English source -> Hindi / Tamil)."""
+    __tablename__ = "instruction_translations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    style_id: Mapped[int] = mapped_column(Integer, index=True)
+    language: Mapped[str] = mapped_column(String(10))
+    source_hash: Mapped[str] = mapped_column(String(64), index=True)
+    steps_json: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class SavedStyle(Base):
+    """A look the customer / stylist saved as a favourite, with its AI preview and cutting steps."""
+    __tablename__ = "saved_styles"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    style_id: Mapped[int] = mapped_column(Integer)
+    style_name: Mapped[str] = mapped_column(String(150))
+    service: Mapped[str] = mapped_column(String(30), default="Hair")
+    image_url: Mapped[str] = mapped_column(String(500))
+    stylist_instructions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    recommendation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("style_recommendations.id"), nullable=True)
+    saved_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

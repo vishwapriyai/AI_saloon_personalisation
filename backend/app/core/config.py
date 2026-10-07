@@ -5,6 +5,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Salon AI & Customer Analytics Platform"
     SALON_NAME: str = "LUXE Styling"
+    # Customer type shown on the profile and stylist view (VIP > Premium > Priority)
+    VIP_MIN_SPEND: float = 10000.0
+    VIP_MIN_VISITS: int = 10
+    PREMIUM_MIN_SPEND: float = 5000.0
+    PREMIUM_MIN_VISITS: int = 6
+    PRIORITY_MIN_SPEND: float = 2000.0
+    PRIORITY_MIN_VISITS: int = 3
     REFERRAL_DISCOUNT_PERCENT: int = 15
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = "super-secret-key-change-in-production-salon-ai-2026"
@@ -36,18 +43,9 @@ class Settings(BaseSettings):
     # 'nvidia' (self-hosted NIM) or 'huggingface' (public HF Space, testing only)
     IMAGE_EDIT_PROVIDER: str = "gemini"
     GEMINI_API_KEY: str = ""
-    GEMINI_API_KEY_2: str = ""
-    GEMINI_API_KEY_3: str = ""
-    GEMINI_API_KEY_4: str = ""
 
-    def get_gemini_api_keys(self) -> list[str]:
-        keys = [
-            os.getenv("GEMINI_API_KEY", self.GEMINI_API_KEY),
-            os.getenv("GEMINI_API_KEY_2", self.GEMINI_API_KEY_2),
-            os.getenv("GEMINI_API_KEY_3", self.GEMINI_API_KEY_3),
-            os.getenv("GEMINI_API_KEY_4", self.GEMINI_API_KEY_4),
-        ]
-        return [k.strip() for k in keys if k and k.strip()]
+    def get_gemini_api_key(self) -> str:
+        return os.getenv("GEMINI_API_KEY", self.GEMINI_API_KEY).strip()
 
     GEMINI_FAST_MODEL: str = "gemini-2.5-flash-image"        # 8 previews
     GEMINI_HQ_MODEL: str = "gemini-3-pro-image-preview"      # final reference of the chosen style
