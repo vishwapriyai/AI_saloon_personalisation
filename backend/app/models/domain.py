@@ -60,6 +60,7 @@ class Customer(Base):
     total_spent: Mapped[float] = mapped_column(Float, default=0.0)
     last_visit_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # customer login
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)  # temporary password from staff
     home_branch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("branches.id"), nullable=True)  # branch registered at
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -73,7 +74,12 @@ class CustomerConsent(Base):
     consent_before_after_share: Mapped[bool] = mapped_column(Boolean, default=False)
     is_minor_parental_consent: Mapped[bool] = mapped_column(Boolean, default=False)
     dpdp_act_compliant: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Photos are sent to an external image-editing service to create the previews
+    consent_third_party_ai: Mapped[bool] = mapped_column(Boolean, default=False)
+    policy_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    recorded_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # staff name or "customer"
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 class CustomerPreference(Base):
     __tablename__ = "customer_preferences"
@@ -107,6 +113,9 @@ class CustomerPhoto(Base):
     hair_length: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     hair_density: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     beard_style_current: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    beard_length_class: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    beard_pattern: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    beard_zones_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     facial_features_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -236,6 +245,8 @@ class StyleSelection(Base):
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"))
     selected_hairstyle_id: Mapped[Optional[int]] = mapped_column(ForeignKey("hairstyles.id"), nullable=True)
     selected_beardstyle_id: Mapped[Optional[int]] = mapped_column(ForeignKey("beard_styles.id"), nullable=True)
+    # Name at the time of selection, so history stays correct if a catalogue entry is later renamed or changed
+    style_name: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
     reference_image_url: Mapped[str] = mapped_column(String(500))
     stylist_approved: Mapped[bool] = mapped_column(Boolean, default=True)
     stylist_rejection_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

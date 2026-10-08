@@ -28,9 +28,12 @@ from app.ai.errors import ImageEditError
 from app.ai.nvidia_nim import nvidia_nim_client
 from app.ai.prompt_engine import PROMPT_TEMPLATE_VERSION, prompt_engine
 from app.ai.vision_models import (
-    LM_CHEEK_SKIN, LM_FOREHEAD_CENTER, FaceGeometry, delta_e, get_vision_models, hair_lab, portrait_box,
+    LM_CHEEK_SKIN, LM_FOREHEAD_CENTER, LM_NOSE_TIP, FaceGeometry, delta_e, get_vision_models, hair_lab, portrait_box,
 )
-from app.core.config import settings
+from app.ai.vision_models import hair_length as measure_hair_length
+from app.core.config import TEST_ONLY_PROVIDERS, settings
+from app.core.privacy import photo_cache_tag
+from app.core.security import media_path
 from app.core.storage import storage_service
 
 logger = logging.getLogger(__name__)
@@ -149,11 +152,11 @@ def _fit_to(img: Image.Image, size: tuple[int, int]) -> Image.Image:
     return ImageOps.fit(img, size, Image.Resampling.LANCZOS, centering=(0.5, 0.4))
 
 
-def _skin_lab(rgb: np.ndarray, face: FaceGeometry) -> np.ndarray:
+def _skin_lab(rgb: np.ndarray, face: FaceGeometry, points: tuple = LM_CHEEK_SKIN) -> np.ndarray:
     lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
     r = max(3, int(face.width * 0.06))
     samples = []
-    for i in LM_CHEEK_SKIN:
+    for i in points:
         x, y = (int(v) for v in face.pt(i))
         patch = lab[max(0, y - r):y + r, max(0, x - r):x + r].reshape(-1, 3)
         if len(patch):
@@ -254,6 +257,10 @@ def add_preview_label(img: Image.Image) -> Image.Image:
 # ----------------------------------------------------------------------------
 # Validation
 # ----------------------------------------------------------------------------
+# Bump when the validation rules change, so cached previews accepted under older rules are not reused
+VALIDATION_VERSION = "validate-v3"
+
+
 @dataclass
 class Validation:
     problem: Optional[str]
@@ -261,8 +268,63 @@ class Validation:
     hair_consistency_score: Optional[float] = None
 
 
-def validate_edit(src: SourcePhoto, edited_rgb: np.ndarray, colour_change_allowed: bool) -> Validation:
+@dataclass(frozen=True)
+class ValidationProfile:
+    """What an edit for one service may change. A beard edit legitimately changes the lower face, so it is
+    checked against forehead skin and a slightly looser identity threshold; only colour looks may recolour hair."""
+    service: str
+    identity_min: float
+    skin_points: tuple
+    colour_change_allowed: bool
+
+
+# Catalogue finished lengths -> rank on the same scale as the measured length (Short / Medium / Long / Very Long)
+TARGET_LENGTH_RANK = {"short": 2.0, "bob": 2.5, "lob": 3.0, "medium": 3.0, "long": 4.0, "very long": 5.0}
+MEASURED_LENGTH_RANK = {"Short": 2.0, "Medium": 3.0, "Long": 4.0, "Very Long": 5.0}
+COLOUR_MIN_DELTA_E = 4.0           # a colour look that leaves the hair colour almost unchanged was not applied
+BEARD_MIN_CHANGED_FRACTION = 0.04  # share of the lower face that must change for a beard look
+
+
+def validation_profile(style: Dict[str, Any]) -> ValidationProfile:
+    service = style.get("service") or ("Beard" if str(style.get("style_code", "")).startswith("BEARD") else "Hair")
+    if service == "Beard":
+        return ValidationProfile("Beard", settings.BEARD_IDENTITY_MIN_SIMILARITY, LM_FOREHEAD_CENTER, False)
+    return ValidationProfile(service, settings.IDENTITY_MIN_SIMILARITY, LM_CHEEK_SKIN, service == "Colour")
+
+
+def _style_not_applied(src: SourcePhoto, edited_rgb: np.ndarray, face: FaceGeometry, mask: np.ndarray,
+                       style: Dict[str, Any], profile: ValidationProfile, hair_de: Optional[float]) -> Optional[str]:
+    """
+    Positive check that the requested look is visible, not only that nothing else changed. Coarse on purpose:
+    it catches clear misses (e.g. a long result for a short cut); anything it cannot measure passes.
+    """
+    if profile.service == "Hair":
+        target = TARGET_LENGTH_RANK.get(str(style.get("hair_length", "")).strip().lower())
+        measured, _ = measure_hair_length(mask, face)
+        got = MEASURED_LENGTH_RANK.get(measured)
+        # Too long by 1.5+ classes (e.g. a bob that came back long) or too short by 2+ classes. Lob vs Long (one
+        # class) is tolerated: a lob that touches the shoulders can measure "Long" on the crop.
+        if target is not None and got is not None and (got - target >= 1.5 or target - got >= 2.0):
+            return f"requested cut not applied (finished length looks {measured}, style is {style.get('hair_length')})"
+    elif profile.service == "Colour":
+        if hair_de is not None and hair_de < COLOUR_MIN_DELTA_E:
+            return f"requested colour not applied (hair colour almost unchanged, deltaE {hair_de:.1f})"
+    elif profile.service == "Beard":
+        h, w = edited_rgb.shape[:2]
+        y0 = int(max(0, src.face.pt(LM_NOSE_TIP)[1]))
+        y1 = int(min(h, src.face.chin_y + 0.15 * src.face.height))
+        x0 = int(max(0, src.face.center_x - 0.5 * src.face.width))
+        x1 = int(min(w, src.face.center_x + 0.5 * src.face.width))
+        if y1 > y0 and x1 > x0:
+            diff = np.abs(src.rgb[y0:y1, x0:x1].astype(np.int16) - edited_rgb[y0:y1, x0:x1].astype(np.int16))
+            if (diff.max(axis=2) > 20).mean() < BEARD_MIN_CHANGED_FRACTION:
+                return "requested beard style not applied (lower face almost unchanged)"
+    return None
+
+
+def validate_edit(src: SourcePhoto, edited_rgb: np.ndarray, style: Dict[str, Any]) -> Validation:
     vm = get_vision_models()
+    profile = validation_profile(style)
     changed = np.abs(src.rgb.astype(np.int16) - edited_rgb.astype(np.int16)).max(axis=2) > 20
     if changed.mean() < 0.003:
         return Validation("model returned the photo unchanged")
@@ -290,10 +352,11 @@ def validate_edit(src: SourcePhoto, edited_rgb: np.ndarray, colour_change_allowe
         return Validation(f"face moved or resized relative to the scene (shift={shift:.2f}, scale={scale:.2f})")
 
     identity = vm.identity_similarity(src.embedding, vm.face_embedding(edited_rgb, face))
-    if identity < settings.IDENTITY_MIN_SIMILARITY:
+    if identity < profile.identity_min:
         return Validation(f"identity_validation_failed (similarity {identity:.2f})", identity)
 
-    skin_shift = delta_e(src.skin_lab, _skin_lab(edited_rgb, face))
+    skin_before = src.skin_lab if profile.skin_points == LM_CHEEK_SKIN else _skin_lab(src.rgb, src.face, profile.skin_points)
+    skin_shift = delta_e(skin_before, _skin_lab(edited_rgb, face, profile.skin_points))
     if skin_shift > 15:
         return Validation(f"skin tone changed (deltaE {skin_shift:.1f})", identity)
 
@@ -311,13 +374,17 @@ def validate_edit(src: SourcePhoto, edited_rgb: np.ndarray, colour_change_allowe
     if _border_difference(aligned, edited_rgb, ignore) > 35:
         return Validation("background or clothing changed", identity)
 
-    hair_score = None
+    hair_score = hair_de = None
     edited_lab = hair_lab(edited_rgb, mask)
     if src.hair_lab is not None and edited_lab is not None:
-        de = delta_e(src.hair_lab, edited_lab)
-        hair_score = float(np.clip(1.0 - de / 40.0, 0.0, 1.0))
-        if de > settings.HAIR_COLOUR_MAX_DELTA_E and not colour_change_allowed:
-            return Validation(f"hair colour changed (deltaE {de:.1f})", identity, hair_score)
+        hair_de = delta_e(src.hair_lab, edited_lab)
+        hair_score = float(np.clip(1.0 - hair_de / 40.0, 0.0, 1.0))
+        if hair_de > settings.HAIR_COLOUR_MAX_DELTA_E and not profile.colour_change_allowed:
+            return Validation(f"hair colour changed (deltaE {hair_de:.1f})", identity, hair_score)
+
+    missed = _style_not_applied(src, edited_rgb, face, mask, style, profile, hair_de)
+    if missed:
+        return Validation(missed, identity, hair_score)
     return Validation(None, identity, hair_score)
 
 
@@ -326,6 +393,8 @@ def validate_edit(src: SourcePhoto, edited_rgb: np.ndarray, colour_change_allowe
 # ----------------------------------------------------------------------------
 class GeminiEditor:
     name = "gemini"
+    supports_back_image = True  # other providers take one photo (+ optional style reference) only
+    supports_extra_images = True
 
     def __init__(self):
         from google import genai  # imported lazily so the app starts without the key
@@ -346,7 +415,8 @@ class GeminiEditor:
         return True
 
     async def edit_image(self, tier: str, prompt: str, photo: bytes, reference: Optional[bytes],
-                         usage: Optional[Dict[str, Any]] = None) -> bytes:
+                         usage: Optional[Dict[str, Any]] = None, back_image: Optional[bytes] = None,
+                         extra_images: Optional[list[bytes]] = None) -> bytes:
         from google.genai import types
         from google.genai.errors import APIError
 
@@ -354,6 +424,12 @@ class GeminiEditor:
         masked_key = self._key[:6] + "..." + self._key[-4:] if len(self._key) > 10 else "***"
 
         contents: list[Any] = [types.Part.from_bytes(data=photo, mime_type="image/jpeg")]
+        if extra_images:
+            for img_b in extra_images:
+                if img_b:
+                    contents.append(types.Part.from_bytes(data=img_b, mime_type="image/jpeg"))
+        elif back_image:
+            contents.append(types.Part.from_bytes(data=back_image, mime_type="image/jpeg"))
         if reference:
             contents.append(types.Part.from_bytes(data=reference, mime_type="image/jpeg"))
         contents.append(prompt)
@@ -650,6 +726,8 @@ class HairStyleGenerator:
 
     def _get_editor(self, provider: Optional[str] = None):
         provider = (provider or settings.IMAGE_EDIT_PROVIDER).lower()
+        if settings.is_production and provider in TEST_ONLY_PROVIDERS:
+            raise ImageEditError(f"The '{provider}' image service is for testing only and is disabled in production.")
         if provider not in self._editors:
             if provider == "nvidia":
                 self._editors[provider] = nvidia_nim_client
@@ -664,7 +742,8 @@ class HairStyleGenerator:
         return self._editors[provider]
 
     async def _load_bytes(self, url: str) -> bytes:
-        if url.startswith("/static/media/"):
+        if media_path(url).startswith("/static/media/"):
+            url = media_path(url)
             path = os.path.join(storage_service.base_dir, *url[len("/static/media/"):].split("/"))
             if not os.path.isfile(path):
                 raise ImageEditError(f"Customer photo not found: {url}")
@@ -684,6 +763,10 @@ class HairStyleGenerator:
         face = vm.detect_face(np.asarray(img))
         if face is None:
             raise ImageEditError("Please make sure your face is clearly visible.")
+        if face.width < settings.GENERATION_MIN_FACE_PX:
+            # The crop would be upscaled a lot, and identity checks (SFace) are unreliable on tiny faces
+            raise ImageEditError("Your face is too small in this photo for a reliable preview. "
+                                 "Please take a closer photo.")
 
         crop = img.crop(portrait_box(face, img.size))
         scale = settings.AI_INPUT_MAX_SIDE / max(crop.size)
@@ -751,6 +834,21 @@ class HairStyleGenerator:
         log_progress("TOKENS", f"Style #{style_id} attempt {attempt} | {model} | Input: {in_tok:,} + Output: {out_tok:,} = Total: {tot_tok:,} tokens (${call_cost:.5f})", "INFO")
         log_progress("TOKENS-PHOTO-TOTAL", f"{photo_url.rsplit('/', 1)[-1]}: Calls={total['calls']} | Cumulative Tokens={total['tokens']:,} | Total Cost=${total['cost_usd']:.5f}", "INFO")
 
+    @staticmethod
+    def _sends_back(editor: Any, back_jpeg: Optional[bytes]) -> bool:
+        return back_jpeg is not None and getattr(editor, "supports_back_image", False)
+
+    async def _edit(self, editor: Any, tier: str, prompt: str, photo: bytes, reference: Optional[bytes],
+                    usage: Dict[str, Any], back_jpeg: Optional[bytes] = None,
+                    extra_jpegs: Optional[list[bytes]] = None) -> bytes:
+        """Calls the provider. Passes extra reference images if supported."""
+        kwargs: Dict[str, Any] = {"usage": usage}
+        if getattr(editor, "supports_extra_images", False) and extra_jpegs:
+            kwargs["extra_images"] = extra_jpegs
+        elif self._sends_back(editor, back_jpeg):
+            kwargs["back_image"] = back_jpeg
+        return await editor.edit_image(tier, prompt, photo, reference, **kwargs)
+
     def _save(self, jpeg: bytes, style_id: Any) -> str:
         _, url = storage_service.save_bytes(jpeg, folder="generated", filename_prefix=f"gen_style_{style_id}")
         return url
@@ -776,29 +874,58 @@ class HairStyleGenerator:
         model = editor.model_for(tier)
         log_progress("STEP 2/4", f"Selected AI Provider: '{editor.name.upper()}' | Model: '{model}'", "INFO")
 
+        cust_len = str(customer_analysis.get("hair_length", "")).lower()
+        cust_den = str(customer_analysis.get("hair_density", "")).lower()
+        is_cust_bald = cust_len == "bald" or "bald" in cust_den or "sparse" in cust_den
+        is_beard_service = style_metadata.get("service") == "Beard" or str(style_metadata.get("style_code", "")).startswith("BEARD")
+
         reference_jpeg = None
-        if settings.USE_STYLE_REFERENCE_IMAGE and editor.supports_reference(tier) and style_metadata.get("preview_image_url"):
+        if (settings.USE_STYLE_REFERENCE_IMAGE and editor.supports_reference(tier)
+                and style_metadata.get("preview_image_url") and not is_cust_bald and not is_beard_service):
             reference_jpeg = _to_jpeg(prepare_ai_input(await self._load_bytes(style_metadata["preview_image_url"])))
 
-        # Only a colour service may change the hair colour; smoothening/perm and beard edits must keep it
-        colour_change_allowed = style_metadata.get("service") == "Colour"
+        extra_jpegs = []
+        for key in ("side_image_url", "back_image_url"):
+            url = customer_analysis.get(key)
+            if url and url != customer_image_url:
+                try:
+                    b = await self._load_bytes(url)
+                    extra_jpegs.append(_to_jpeg(prepare_ai_input(b)))
+                except Exception as e:
+                    log_progress("EXTRA-PHOTO-LOAD-WARNING", f"Could not load {key}: {e}", "WARNING")
+        back_jpeg = extra_jpegs[-1] if extra_jpegs else None
+
         last = Validation("generation was not attempted")
         prompt = ""
         attempts = 0
+        fallback = settings.IMAGE_EDIT_FALLBACK_PROVIDER.strip().lower()
+        rejected = False  # an earlier attempt was answered but failed validation
 
         for attempt in range(settings.GENERATION_MAX_ATTEMPTS):
             attempts = attempt + 1
+            # Last attempt after a rejected preview: give the backup provider a chance instead of repeating
+            if (rejected and attempt == settings.GENERATION_MAX_ATTEMPTS - 1 and fallback
+                    and editor.name != fallback):
+                try:
+                    editor = self._get_editor(fallback)
+                    model = editor.model_for(tier)
+                    reference_jpeg = reference_jpeg if editor.supports_reference(tier) else None
+                    log_progress("FALLBACK-AFTER-REJECT", f"Style #{style_id}: last attempt with '{fallback}'", "WARNING")
+                except ImageEditError as fe:
+                    log_progress("FALLBACK-FAILED", f"Fallback provider '{fallback}' unavailable: {fe.reason}", "WARNING")
             prompt = prompt_engine.build_prompt(
                 customer_analysis, style_metadata, strict=attempt > 0, with_reference_image=reference_jpeg is not None,
-                max_chars=editor.max_prompt_chars)
+                with_back_image=self._sends_back(editor, back_jpeg), num_extra_images=len(extra_jpegs), max_chars=editor.max_prompt_chars)
             
             log_progress("STEP 3/4", f"Attempt {attempt + 1}/{settings.GENERATION_MAX_ATTEMPTS} | Prompt ({len(prompt)} chars): '{prompt[:80]}...'", "INFO")
 
             cache_key = hashlib.sha256(
-                src.jpeg + (reference_jpeg or b"") + f"|{style_id}|{model}|{PROMPT_TEMPLATE_VERSION}|{prompt}".encode()
+                src.jpeg + (reference_jpeg or b"") + (back_jpeg if self._sends_back(editor, back_jpeg) else b"") + f"|{style_id}|{model}|{PROMPT_TEMPLATE_VERSION}|{VALIDATION_VERSION}|{prompt}".encode()
             ).hexdigest()[:32]
-            cache_img = os.path.join(self.cache_dir, f"{cache_key}.jpg")
-            cache_meta = os.path.join(self.cache_dir, f"{cache_key}.json")
+            # Prefixed with the photo's tag so erasing a customer's photos also removes these copies
+            cache_name = f"{photo_cache_tag(customer_image_url)}_{cache_key}"
+            cache_img = os.path.join(self.cache_dir, f"{cache_name}.jpg")
+            cache_meta = os.path.join(self.cache_dir, f"{cache_name}.json")
             if os.path.isfile(cache_img) and os.path.isfile(cache_meta):
                 with open(cache_img, "rb") as f, open(cache_meta, encoding="utf-8") as m:
                     meta = json.load(m)
@@ -812,7 +939,7 @@ class HairStyleGenerator:
             try:
                 async with self._sem:
                     raw = await asyncio.wait_for(
-                        editor.edit_image(tier, prompt, src.jpeg, reference_jpeg, usage=usage),
+                        self._edit(editor, tier, prompt, src.jpeg, reference_jpeg, usage, back_jpeg, extra_jpegs=extra_jpegs),
                         timeout=settings.GENERATION_TIMEOUT_SECONDS,
                     )
             except asyncio.TimeoutError:
@@ -822,16 +949,20 @@ class HairStyleGenerator:
             except ImageEditError as e:
                 log_progress("PROVIDER-ERROR", f"Style #{style_id}: {editor.name} failed ({e.reason})", "ERROR")
                 fallback_handled = False
-                fallback = settings.IMAGE_EDIT_FALLBACK_PROVIDER.strip().lower()
                 if fallback and editor.name != fallback:
                     log_progress("FALLBACK-ATTEMPT", f"Trying fallback provider '{fallback}' for Style #{style_id}", "WARNING")
                     try:
                         editor = self._get_editor(fallback)
                         model = editor.model_for(tier)
                         reference_jpeg = reference_jpeg if editor.supports_reference(tier) else None
+                        # The fallback may have a different prompt limit and image support: rebuild its prompt
+                        prompt = prompt_engine.build_prompt(
+                            customer_analysis, style_metadata, strict=attempt > 0,
+                            with_reference_image=reference_jpeg is not None,
+                            with_back_image=self._sends_back(editor, back_jpeg), num_extra_images=len(extra_jpegs), max_chars=editor.max_prompt_chars)
                         async with self._sem:
                             raw = await asyncio.wait_for(
-                                editor.edit_image(tier, prompt, src.jpeg, reference_jpeg, usage=usage),
+                                self._edit(editor, tier, prompt, src.jpeg, reference_jpeg, usage, back_jpeg, extra_jpegs=extra_jpegs),
                                 timeout=settings.GENERATION_TIMEOUT_SECONDS,
                             )
                             fallback_handled = True
@@ -847,8 +978,9 @@ class HairStyleGenerator:
             self._report_usage(customer_image_url, style_id, attempts, model, usage)
 
             edited = _fit_to(Image.open(io.BytesIO(raw)).convert("RGB"), (src.rgb.shape[1], src.rgb.shape[0]))
-            last = await asyncio.to_thread(validate_edit, src, np.asarray(edited), colour_change_allowed)
+            last = await asyncio.to_thread(validate_edit, src, np.asarray(edited), style_metadata)
             if last.problem:
+                rejected = True
                 log_progress("VALIDATION-REJECT", f"Style #{style_id} attempt {attempts} rejected: {last.problem}", "WARNING")
                 continue
 
@@ -879,9 +1011,8 @@ class HairStyleGenerator:
         provider: Optional[str] = None,
     ) -> EditResult:
         """
-        Applies the style to the customer's SIDE or BACK photo. These views have no full face to verify,
-        so the checks are: the photo really changed, and (unless it is a colour service) the hair colour
-        stayed the same. The front preview keeps its full identity checks in generate().
+        Applies the style to the customer's SIDE or BACK photo. Uses all available photos
+        (Front, Side, Back) as multi-view references for 100% hair length and style consistency.
         """
         started = time.monotonic()
         style_id = style_metadata.get("id")
@@ -889,6 +1020,26 @@ class HairStyleGenerator:
         img = img.resize((img.width // 16 * 16, img.height // 16 * 16), Image.Resampling.LANCZOS)
         rgb = np.asarray(img)
         jpeg = _to_jpeg(img)
+
+        extra_jpegs = []
+        for key in ("front_image_url", "side_image_url", "back_image_url"):
+            url = customer_analysis.get(key)
+            if url and url != photo_url:
+                try:
+                    b = await self._load_bytes(url)
+                    extra_jpegs.append(_to_jpeg(prepare_ai_input(b)))
+                except Exception as e:
+                    log_progress("VIEW-EXTRA-PHOTO-LOAD-WARNING", f"Could not load {key} for {view} view: {e}", "WARNING")
+
+        reference_jpeg = None
+        if customer_analysis.get("front_preview_url"):
+            try:
+                ref_bytes = await self._load_bytes(customer_analysis["front_preview_url"])
+                reference_jpeg = _to_jpeg(prepare_ai_input(ref_bytes))
+                log_progress("FRONT-PREVIEW-LOADED", f"Loaded AI front preview for {view} view consistency", "INFO")
+            except Exception as e:
+                log_progress("FRONT-PREVIEW-LOAD-WARNING", f"Could not load AI front preview for {view} view: {e}", "WARNING")
+
         editor = self._get_editor(provider)
         model = editor.model_for(tier)
         vm = get_vision_models()
@@ -900,13 +1051,19 @@ class HairStyleGenerator:
         attempts = 0
         for attempt in range(settings.GENERATION_MAX_ATTEMPTS):
             attempts = attempt + 1
-            prompt = prompt_engine.build_view_prompt(customer_analysis, style_metadata, view, strict=attempt > 0,
-                                                     max_chars=editor.max_prompt_chars)
+            prompt = prompt_engine.build_view_prompt(
+                customer_analysis, style_metadata, view, strict=attempt > 0,
+                num_extra_images=len(extra_jpegs),
+                with_reference_image=reference_jpeg is not None,
+                max_chars=editor.max_prompt_chars
+            )
             usage: Dict[str, Any] = {}
             try:
                 async with self._sem:
-                    raw = await asyncio.wait_for(editor.edit_image(tier, prompt, jpeg, None, usage=usage),
-                                                 timeout=settings.GENERATION_TIMEOUT_SECONDS)
+                    raw = await asyncio.wait_for(
+                        self._edit(editor, tier, prompt, jpeg, reference_jpeg, usage, None, extra_jpegs=extra_jpegs),
+                        timeout=settings.GENERATION_TIMEOUT_SECONDS
+                    )
             except asyncio.TimeoutError:
                 last_problem = "the image service took too long to respond"
                 continue

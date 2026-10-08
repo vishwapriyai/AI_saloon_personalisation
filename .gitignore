@@ -49,11 +49,22 @@ Thumbs.db
 *.wmv
 
 backend/tests/*
+# unit tests are part of the code (the rest of tests/ is manual diagnostics)
+!backend/tests/unit/
 .env
 .pytest_cache
 infra/*
 requirement-analysis/*
 sample-pic/*
 *.zip
-=======
 
+# Secrets and customer data must never be committed
+credintials.md
+*.pem
+backend/.env
+frontend/.env
+# Customer photos, AI previews, audio and the AI cache (biometric data)
+backend/media_storage/
+# Local databases (customer records)
+*.db
+__pycache__/

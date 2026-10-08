@@ -64,11 +64,28 @@ export const CustomerTypeBadge: React.FC<{ type?: CustomerType }> = ({ type = 'R
   );
 };
 
-export const CustomerAvatar: React.FC<{ name: string; url?: string | null; size?: 'md' | 'lg' }> = ({ name, url, size = 'md' }) => (
-  <div className={`${size === 'lg' ? 'w-20 h-20 text-3xl' : 'w-14 h-14 text-xl'} rounded-2xl overflow-hidden bg-slate-800 border border-amber-500/30 flex-shrink-0 flex items-center justify-center`}>
-    {url ? <img src={url} alt={name} className="w-full h-full object-cover" /> : <span className="text-amber-400 font-bold">{name[0]?.toUpperCase()}</span>}
-  </div>
-);
+export const CustomerAvatar: React.FC<{ name: string; url?: string | null; size?: 'md' | 'lg' }> = ({ name, url, size = 'md' }) => {
+  const [imgError, setImgError] = React.useState(false);
+
+  React.useEffect(() => {
+    setImgError(false);
+  }, [url]);
+
+  return (
+    <div className={`${size === 'lg' ? 'w-20 h-20 text-3xl' : 'w-14 h-14 text-xl'} rounded-2xl overflow-hidden bg-slate-800 border border-amber-500/30 flex-shrink-0 flex items-center justify-center`}>
+      {url && !imgError ? (
+        <img
+          src={url}
+          alt={name}
+          onError={() => setImgError(true)}
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <span className="text-amber-400 font-bold">{name[0]?.toUpperCase() || '?'}</span>
+      )}
+    </div>
+  );
+};
 
 /** Top services as icon chips (most used first). */
 export const FrequentServices: React.FC<{ services?: { name: string; count: number }[]; showCount?: boolean }> = ({ services = [], showCount }) =>

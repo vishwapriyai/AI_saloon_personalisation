@@ -48,11 +48,14 @@ export const RecommendationsPage: React.FC = () => {
     setRetrying((r) => ({ ...r, [styleId]: true }));
     let gen: any;
     try {
-      const res = await generateStyleImages({ recommendation_id: recId, selected_style_ids: [styleId] });
+      // The same trim choice that picked the looks also shapes the previews (e.g. "keep length" vs a real cut)
+      const trim = localStorage.getItem('salon_trim_preference') || undefined;
+      const res = await generateStyleImages({ recommendation_id: recId, selected_style_ids: [styleId], trim_preference: trim });
       gen = res?.generations?.[0];
     } catch (err) {
       console.error(err);
-      gen = { style_id: styleId, status: 'FAILED', generated_image_url: '', error: 'Preview generation failed. Please try again.' };
+      gen = { style_id: styleId, status: 'FAILED', generated_image_url: '',
+        error: err instanceof Error && err.message ? err.message : 'Preview generation failed. Please try again.' };
     }
     setStyles((prev) => prev.map((s) => (s.style_id === styleId ? withGeneration(s, gen) : s)));
     try {
@@ -146,6 +149,9 @@ export const RecommendationsPage: React.FC = () => {
           </span>
           <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight mt-1">Your Top {styles.length} Looks</h2>
           <p className="text-xs sm:text-sm text-slate-400">Your own photo with each recommended hairstyle. Tap to preview & select.</p>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Previews are AI illustrations to help you choose. The real result depends on your hair and is agreed with your stylist; it is not a guarantee.
+          </p>
         </div>
 
         <button

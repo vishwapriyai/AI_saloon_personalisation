@@ -14,9 +14,30 @@ class Settings(BaseSettings):
     PRIORITY_MIN_VISITS: int = 3
     REFERRAL_DISCOUNT_PERCENT: int = 15
     API_V1_STR: str = "/api/v1"
+    # 'development' seeds sample accounts and auto-adds missing DB columns at startup; 'production' does neither,
+    # refuses the default SECRET_KEY, and blocks test-only image providers.
+    APP_ENV: str = "development"
     SECRET_KEY: str = "super-secret-key-change-in-production-salon-ai-2026"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    # Shared salon tablets: keep sessions short (the frontend also logs customers out after inactivity)
+    STAFF_TOKEN_EXPIRE_MINUTES: int = 60 * 12
+    CUSTOMER_TOKEN_EXPIRE_MINUTES: int = 60 * 2
+    PASSWORD_MIN_LENGTH: int = 8
+    # Failed logins per account (or per client address) before a temporary lockout
+    LOGIN_MAX_FAILURES: int = 5
+    LOGIN_LOCKOUT_MINUTES: int = 15
+    # Customer photos, previews and after-photos are served only through signed, expiring links
+    MEDIA_URL_EXPIRE_MINUTES: int = 60 * 6
+    # A photo session can be reused for new previews only while it is recent and no haircut was done since
+    PHOTO_REUSE_MAX_DAYS: int = 30
+    # Photos of customers who did not consent to history retention are deleted after this many days
+    MEDIA_RETENTION_DAYS_WITHOUT_CONSENT: int = 1
+    # AI preview cache files (copies of edited customer photos) are removed after this many days
+    AI_CACHE_MAX_DAYS: int = 30
+
+    @property
+    def is_production(self) -> bool:
+        return self.APP_ENV.strip().lower() == "production"
 
     # Database
     # Supports MySQL or fallback SQLite for immediate local execution
@@ -71,10 +92,12 @@ class Settings(BaseSettings):
     # Number of recommended styles (and therefore personalized previews generated) per customer
     STYLE_RECOMMENDATION_COUNT: int = 4
     MAX_PARALLEL_GENERATIONS: int = 4
-    # Free shared GPUs can take 1-2 minutes per image when busy, so allow slow answers before retrying
-    GENERATION_TIMEOUT_SECONDS: int = 330          # whole edit attempt, including provider retries
-    PROVIDER_REQUEST_TIMEOUT_SECONDS: int = 150    # one HTTP request to the image provider
-    PROVIDER_REQUEST_RETRIES: int = 2              # retries when the provider hangs or has a transient error
+    # Free shared GPUs can take 1-2 minutes per image when busy, so allow slow answers before retrying.
+    # Keep PROVIDER_REQUEST_TIMEOUT_SECONDS x PROVIDER_REQUEST_RETRIES below GENERATION_TIMEOUT_SECONDS (checked
+    # at startup), and the reverse proxy's read timeout above GENERATION_TIMEOUT_SECONDS x GENERATION_MAX_ATTEMPTS.
+    GENERATION_TIMEOUT_SECONDS: int = 240          # one edit attempt, including provider retries (semaphore wait excluded)
+    PROVIDER_REQUEST_TIMEOUT_SECONDS: int = 110    # one HTTP request to the image provider
+    PROVIDER_REQUEST_RETRIES: int = 2              # tries per attempt when the provider hangs or has a transient error
     # Optional second provider tried when the main one is unavailable (e.g. "huggingface"); empty = none
     IMAGE_EDIT_FALLBACK_PROVIDER: str = ""
     GENERATION_MAX_ATTEMPTS: int = 2
@@ -85,14 +108,43 @@ class Settings(BaseSettings):
 
     # Computer-vision models (MediaPipe face landmarks + hair segmentation, OpenCV SFace face recognition)
     AI_MODELS_DIR: str = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "ai_models")
-    # SFace cosine similarity; 0.363 is the model authors' same-person threshold
-    IDENTITY_MIN_SIMILARITY: float = 0.363
+    # SFace cosine similarity; 0.35 protects customer facial identity while allowing valid hair edits
+    IDENTITY_MIN_SIMILARITY: float = 0.35
+    # Beard looks change the lower face (part of what SFace sees), so they use a slightly looser threshold
+    BEARD_IDENTITY_MIN_SIMILARITY: float = 0.32
+    # Smallest face (px, on the uploaded photo) a preview is made from; matches the upload check
+    GENERATION_MIN_FACE_PX: int = 120
+    # Minimum hair length in cm required for chemical smoothing, perm, texture services
+    TEXTURE_MIN_LENGTH_CM: float = 5.0
+
     # Max CIE76 colour difference between original and edited hair before the edit is rejected
     HAIR_COLOUR_MAX_DELTA_E: float = 18.0
 
-    # CORS
-    BACKEND_CORS_ORIGINS: list[str] = ["*"]
+    # CORS: the app is normally served same-origin (Vite proxy / Nginx); list extra origins here if needed
+    BACKEND_CORS_ORIGINS: list[str] = ["http://localhost:5173", "https://localhost:5173"]
 
     model_config = SettingsConfigDict(case_sensitive=True, env_file=".env", extra="ignore")
+
+
+DEFAULT_SECRET_KEY = "super-secret-key-change-in-production-salon-ai-2026"
+TEST_ONLY_PROVIDERS = {"huggingface"}  # sends customer photos to a public third-party Space
+
+
+def check_settings(s: "Settings") -> list[str]:
+    """Problems that make the configuration unsafe or inconsistent. In production these stop the app."""
+    problems = []
+    if s.PROVIDER_REQUEST_TIMEOUT_SECONDS * s.PROVIDER_REQUEST_RETRIES >= s.GENERATION_TIMEOUT_SECONDS:
+        problems.append("PROVIDER_REQUEST_TIMEOUT_SECONDS x PROVIDER_REQUEST_RETRIES must be below "
+                        "GENERATION_TIMEOUT_SECONDS, or the provider's last try is cut off.")
+    if s.is_production:
+        if s.SECRET_KEY == DEFAULT_SECRET_KEY or len(s.SECRET_KEY) < 32:
+            problems.append("Set a random SECRET_KEY of at least 32 characters.")
+        if "*" in s.BACKEND_CORS_ORIGINS:
+            problems.append("BACKEND_CORS_ORIGINS must list the real origins, not '*'.")
+        for name in (s.IMAGE_EDIT_PROVIDER, s.IMAGE_EDIT_FALLBACK_PROVIDER):
+            if name.strip().lower() in TEST_ONLY_PROVIDERS:
+                problems.append(f"Image provider '{name}' is for testing only and must not get real customer photos.")
+    return problems
+
 
 settings = Settings()

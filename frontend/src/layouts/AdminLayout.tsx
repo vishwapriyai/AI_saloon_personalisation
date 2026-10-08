@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, Users, Scissors, BarChart3, Tag, Award, Settings, Menu, X, LogOut, ChevronRight, UserSearch
+  LayoutDashboard, Users, BarChart3, Tag, Menu, X, LogOut, ChevronRight, UserSearch
 } from 'lucide-react';
 import { clearSession, getSession } from '../auth/session';
 import { BRAND } from '../config/brand';
@@ -22,11 +22,9 @@ export const AdminLayout: React.FC = () => {
     { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
     { label: 'Customers', path: '/admin/customers', icon: Users },
     { label: 'Serve a Customer', path: '/stylist/customers', icon: UserSearch },
-    { label: 'Hairstyles Catalogue', path: '/admin/styles', icon: Scissors },
     { label: 'Capacity Analytics', path: '/admin/analytics/capacity', icon: BarChart3 },
-    { label: 'Campaigns & Coupons', path: '/admin/campaigns', icon: Tag },
-    { label: 'Loyalty & Membership', path: '/admin/loyalty', icon: Award },
-    { label: 'Settings', path: '/admin/settings', icon: Settings },
+    { label: 'Offers & Coupons', path: '/admin/campaigns', icon: Tag },
+    // Hairstyle catalogue, loyalty & membership and settings pages are not built yet, so they are not listed
   ];
 
   return (

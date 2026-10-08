@@ -1,8 +1,11 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Scissors, User, History, Home, ArrowLeft, LogOut, Users } from 'lucide-react';
 import { clearSession, getSession, isStaff } from '../auth/session';
 import { BrandLogo } from '../components/BrandLogo';
+import { useIdleLogout } from '../auth/useIdleLogout';
+
+const CUSTOMER_IDLE_MINUTES = 10;
 
 export const CustomerLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -17,6 +20,13 @@ export const CustomerLayout: React.FC = () => {
     clearSession();
     navigate(staff ? '/staff/login' : '/customer/login', { replace: true });
   };
+
+  // A customer's own session on a shared tablet ends after a few idle minutes
+  const idleLogout = useCallback(() => {
+    clearSession();
+    navigate('/customer/login', { replace: true });
+  }, [navigate]);
+  useIdleLogout(session?.kind === 'customer', CUSTOMER_IDLE_MINUTES, idleLogout);
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-900">

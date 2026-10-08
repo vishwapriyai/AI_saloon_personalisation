@@ -16,7 +16,7 @@ interface Props {
 }
 
 /** Front / side / back photo slots, each with Live Camera and Take / Upload Photo. */
-export const MultiViewCapture: React.FC<Props> = ({ photos, onChange, required = ['front'] }) => {
+export const MultiViewCapture: React.FC<Props> = ({ photos, onChange, required = ['front', 'back'] }) => {
   const [cameraView, setCameraView] = useState<PhotoView | null>(null);
   const inputs = { front: useRef<HTMLInputElement>(null), side: useRef<HTMLInputElement>(null), back: useRef<HTMLInputElement>(null) };
   const [previews, setPreviews] = useState<Partial<Record<PhotoView, string>>>({});

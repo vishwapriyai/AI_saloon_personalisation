@@ -6,6 +6,8 @@ import type { PhotoView, SelectionComparison } from '../../api/client';
 import { MultiViewCapture } from '../../components/MultiViewCapture';
 import { ComparisonViewer } from '../../components/ComparisonViewer';
 import { workBranchId } from '../../utils/workBranch';
+import { getSession, isStaff } from '../../auth/session';
+import { StaffApproval } from '../../components/StaffApproval';
 
 export const BeforeAfterConfirmationPage: React.FC = () => {
   const navigate = useNavigate();
@@ -20,6 +22,8 @@ export const BeforeAfterConfirmationPage: React.FC = () => {
   const rawSelectedStyle = localStorage.getItem('salon_selected_style');
   const selectedStyle = rawSelectedStyle ? JSON.parse(rawSelectedStyle) : null;
   const completed = comparison?.status === 'COMPLETED';
+  // Completing the service records the visit and the bill: a stylist's action
+  const needsStylist = !isStaff(getSession());
 
   useEffect(() => {
     if (!selectionId) { setLoading(false); return; }
@@ -29,7 +33,7 @@ export const BeforeAfterConfirmationPage: React.FC = () => {
       .finally(() => setLoading(false));
   }, [selectionId]);
 
-  const handleComplete = async () => {
+  const handleComplete = async (staffToken?: string) => {
     if (!photos.front || !selectionId) return;
     setSaving(true);
     setError(null);
@@ -37,6 +41,7 @@ export const BeforeAfterConfirmationPage: React.FC = () => {
       setComparison(await completeSelection(selectionId, photos, rating, {
         branch_id: workBranchId(),
         language: localStorage.getItem('salon_audio_language'),
+        staffToken,
       }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save the finished haircut photos');
@@ -100,8 +105,11 @@ export const BeforeAfterConfirmationPage: React.FC = () => {
                   </div>
                 </div>
 
+                {needsStylist && photos.front ? (
+                  <StaffApproval action="complete the service and record the visit" onApproved={(token) => handleComplete(token)} />
+                ) : (
                 <button
-                  onClick={handleComplete}
+                  onClick={() => handleComplete()}
                   disabled={!photos.front || saving}
                   className={`w-full font-bold py-4 rounded-2xl text-lg shadow-sm transition-all touch-target-large flex items-center justify-center gap-2 ${
                     photos.front && !saving
@@ -111,6 +119,7 @@ export const BeforeAfterConfirmationPage: React.FC = () => {
                 >
                   {saving ? <RefreshCw className="w-6 h-6 animate-spin" /> : 'Save Result & Complete Service'}
                 </button>
+                )}
               </div>
             )}
           </>

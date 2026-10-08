@@ -101,7 +101,7 @@ Every style in the catalogue is scored. **The chosen category decides which styl
 | Suits the customer's hair density | +25 |
 | Matches the hair texture family (straight / wavy / curly / coily) | **+15** |
 | Needs a different hair texture (and has no chemical service) | **−40** |
-| Matches the chosen category (Classic / Trendy / Professional) | +20 (and placed first, see above) |
+| Matches the chosen category (Classic / Trendy / Professional) | not scored: these styles are listed first (see above), so the category is not counted twice |
 | A hair service was requested | +10 |
 | Colour/balayage or keratin/smoothening requested, and the style includes it | +30 |
 | **Longer than the customer's current hair** (a haircut cannot add length) | **−60** |

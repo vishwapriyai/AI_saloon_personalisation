@@ -26,8 +26,7 @@ class StorageService:
         relative_url = f"/static/media/{folder}/{file_id}"
         return file_id, relative_url
 
-    def get_signed_url(self, file_key: str, expires_in_seconds: int = 3600) -> str:
-        # Returns a secure signed image URL for private customer images
-        return f"/api/v1/media/secure-access?key={file_key}&expires={expires_in_seconds}"
+    # Stored addresses (/static/media/...) are private: API responses sign them automatically
+    # (see SignedMediaJSONResponse in app/main.py and sign_media_url in app/core/security.py).
 
 storage_service = StorageService()

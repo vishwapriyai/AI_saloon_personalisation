@@ -7,13 +7,7 @@ import { HairAnalysisCard } from '../../components/HairAnalysisCard';
 
 export const ServiceCategoryPage: React.FC = () => {
   const navigate = useNavigate();
-  const [selectedGender, setSelectedGender] = useState<'Women' | 'Men' | 'All'>('Women');
-  const [selectedServices, setSelectedServices] = useState<string[]>(['Hair']);
-  const [selectedCategory, setSelectedCategory] = useState<'Classic' | 'Trendy' | 'Professional'>('Trendy');
-  const [loading, setLoading] = useState(false);
-  const [fromLastVisit, setFromLastVisit] = useState(false);
-
-  // Check if customer photo analysis indicates a bald or clean shaved scalp
+  // Check if customer photo analysis indicates a bald or clean shaved scalp or gender
   const photoAnalysis = (() => {
     try {
       return JSON.parse(localStorage.getItem('salon_photo_analysis') || 'null');
@@ -21,11 +15,37 @@ export const ServiceCategoryPage: React.FC = () => {
       return null;
     }
   })();
+  const detectedGender = photoAnalysis?.gender === 'Men' || photoAnalysis?.gender === 'Male' ? 'Men' : 'Women';
+  const [selectedGender, setSelectedGender] = useState<'Women' | 'Men' | 'All'>(() => {
+    const saved = localStorage.getItem('salon_customer_gender');
+    if (saved === 'Men' || saved === 'Male') return 'Men';
+    if (saved === 'Women' || saved === 'Female') return 'Women';
+    return detectedGender;
+  });
+  const [selectedServices, setSelectedServices] = useState<string[]>(['Hair']);
+  const [selectedCategory, setSelectedCategory] = useState<'Classic' | 'Trendy' | 'Professional'>('Trendy');
+  const [trimPreference, setTrimPreference] = useState<string>(() => localStorage.getItem('salon_trim_preference') || '0cm');
+  const [customTrimVal, setCustomTrimVal] = useState<string>('2 cm');
+  const [loading, setLoading] = useState(false);
+  const [fromLastVisit, setFromLastVisit] = useState(false);
+  // Bumped when the stylist corrects the analysis (e.g. beard or baldness misread) so the service rules re-run
+  const [, setAnalysisVersion] = useState(0);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+
   const hairLen = String(photoAnalysis?.hair_length || '').toLowerCase();
   const hairDen = String(photoAnalysis?.hair_density || '').toLowerCase();
   const beardStyle = String(photoAnalysis?.beard_style_current || photoAnalysis?.beard_style || '').toLowerCase();
   const isCustomerBald = hairLen === 'bald' || hairDen.includes('bald') || hairDen.includes('sparse');
   const isCleanShaven = !beardStyle || beardStyle === 'clean shaven' || beardStyle === 'none' || beardStyle === 'unknown';
+
+  useEffect(() => {
+    localStorage.setItem('salon_customer_gender', selectedGender);
+  }, [selectedGender]);
+
+  useEffect(() => {
+    const finalVal = trimPreference === 'custom' ? (customTrimVal || '2 cm') : trimPreference;
+    localStorage.setItem('salon_trim_preference', finalVal);
+  }, [trimPreference, customTrimVal]);
 
   // Returning customers: pre-select what they chose last time (they can still change it)
   useEffect(() => {
@@ -36,7 +56,11 @@ export const ServiceCategoryPage: React.FC = () => {
     getLastPreferences(customerId)
       .then((prefs) => {
         if (!active || !prefs) return;
-        if (prefs.gender) setSelectedGender(prefs.gender);
+        if (prefs.gender) {
+          const gStr = String(prefs.gender);
+          const g = (gStr === 'Men' || gStr === 'Male') ? 'Men' : 'Women';
+          setSelectedGender(g);
+        }
         const known = prefs.target_services.filter((s) => services.some((svc) => svc.id === s));
         if (known.length) setSelectedServices(known);
         if (prefs.style_category) setSelectedCategory(prefs.style_category);
@@ -74,17 +98,38 @@ export const ServiceCategoryPage: React.FC = () => {
     { id: 'Professional', title: 'Professional', desc: 'Neat corporate lobs & business styling for work' },
   ];
 
-  // Beard grooming is a men's service: not offered in the Women's collection
   const beardUnavailable = selectedGender === 'Women';
+
+  // Enforce service availability based on photo analysis:
+  // - Bald head -> disable Haircut, Hair Colour, Smoothening
+  // - Clean-shaven face -> disable Beard & Grooming
   useEffect(() => {
-    if (beardUnavailable && selectedServices.includes('Beard')) {
-      const rest = selectedServices.filter((s) => s !== 'Beard');
-      setSelectedServices(rest.length ? rest : ['Hair']);
+    let updated = [...selectedServices];
+
+    if (isCustomerBald) {
+      updated = updated.filter((s) => s === 'Beard');
     }
-  }, [beardUnavailable, selectedServices]);
+    if (isCleanShaven) {
+      updated = updated.filter((s) => s !== 'Beard');
+    }
+
+    if (updated.length === 0) {
+      if (!isCustomerBald) updated = ['Hair'];
+      else if (!isCleanShaven && selectedGender !== 'Women') updated = ['Beard'];
+    }
+
+    if (JSON.stringify(updated) !== JSON.stringify(selectedServices)) {
+      setSelectedServices(updated);
+    }
+  }, [isCustomerBald, isCleanShaven, selectedGender, selectedServices]);
 
   const toggleService = (serviceId: string) => {
-    if (serviceId === 'Beard' && beardUnavailable) return;
+    const isHair = serviceId === 'Hair' || serviceId === 'Colour / Balayage' || serviceId === 'Keratin / Smoothening';
+    const isBeard = serviceId === 'Beard';
+
+    if (isCustomerBald && isHair) return;
+    if ((isCleanShaven || beardUnavailable) && isBeard) return;
+
     if (selectedServices.includes(serviceId)) {
       if (selectedServices.length > 1) {
         setSelectedServices(selectedServices.filter((s) => s !== serviceId));
@@ -96,24 +141,31 @@ export const ServiceCategoryPage: React.FC = () => {
 
   const handleGenerate = async () => {
     setLoading(true);
+    setGenerateError(null);
     const customerId = currentCustomerId();
     const photoId = Number(localStorage.getItem('salon_photo_id') || 0);
 
     try {
+      const activeTrim = trimPreference === 'custom' && customTrimVal.trim()
+        ? customTrimVal.trim()
+        : (trimPreference === '0cm' ? '0 - 1 cm micro-trim' : trimPreference);
+      localStorage.setItem('salon_trim_preference', activeTrim);
+
       const rec = await getRecommendations({
         customer_id: customerId,
         photo_id: photoId,
         target_service_type: selectedServices.join(', '),
         style_category: selectedCategory,
         gender: selectedGender,
+        trim_preference: activeTrim,
       });
 
       localStorage.setItem('salon_recommendation_id', String(rec.recommendation_id));
       localStorage.setItem('salon_recommended_styles', JSON.stringify(rec.recommended_styles));
       navigate('/customer/generate');
     } catch (err) {
-      console.error(err);
-      navigate('/customer/generate');
+      // e.g. no hair services for a bald scalp: show the reason instead of continuing with stale looks
+      setGenerateError(err instanceof Error ? err.message : 'Could not find looks. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -132,27 +184,51 @@ export const ServiceCategoryPage: React.FC = () => {
           )}
         </div>
 
-        <HairAnalysisCard showBeard={selectedGender !== 'Women'} />
+        <HairAnalysisCard showBeard={selectedGender !== 'Women'} onChange={() => setAnalysisVersion((v) => v + 1)} />
 
-        {isCustomerBald && (
-          <div className="bg-amber-500/15 border border-amber-500/40 p-4 rounded-2xl flex items-start space-x-3 text-amber-200 text-xs sm:text-sm shadow-sm">
-            <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+        {isCustomerBald && isCleanShaven && selectedGender !== 'Women' && (
+          <div className="bg-red-500/10 border-2 border-red-500/80 p-4 rounded-2xl flex items-start space-x-3 text-red-200 text-xs sm:text-sm shadow-md ring-1 ring-red-500/30">
+            <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <span className="font-bold text-amber-300 block">Notice: Clean Shaved / Bald Scalp Detected</span>
-              <p className="text-slate-300 leading-relaxed">
-                We don't have hair-based haircut services for you because your photo analysis shows a bald or clean shaved scalp. Haircut services are only for customers with hair. Please select <b>Beard & Grooming</b> service instead.
+              <span className="font-bold text-red-300 block text-sm">Notice: Clean-Shaved & Bald Scalp Detected</span>
+              <p className="text-slate-200 leading-relaxed">
+                Haircut, hair colouring, smoothening, and beard sculpting services are disabled because your photo analysis shows a clean-shaven bald face. Scalp care and facial spa treatments are recommended during your visit.
               </p>
             </div>
           </div>
         )}
 
-        {isCleanShaven && selectedServices.includes('Beard') && !isCustomerBald && (
-          <div className="bg-amber-500/15 border border-amber-500/40 p-4 rounded-2xl flex items-start space-x-3 text-amber-200 text-xs sm:text-sm shadow-sm">
-            <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+        {isCustomerBald && !isCleanShaven && selectedGender !== 'Women' && (
+          <div className="bg-red-500/10 border-2 border-red-500/80 p-4 rounded-2xl flex items-start space-x-3 text-red-200 text-xs sm:text-sm shadow-md ring-1 ring-red-500/30">
+            <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <span className="font-bold text-amber-300 block">Notice: Clean-Shaven Face Detected</span>
-              <p className="text-slate-300 leading-relaxed">
-                We cannot generate a beard for a non-bearded person. Beard trimming & sculpting services require existing facial hair growth. For clean-shaven faces, Clean Shave or facial skin care services apply.
+              <span className="font-bold text-red-300 block text-sm">Notice: Bald Scalp Detected</span>
+              <p className="text-slate-200 leading-relaxed">
+                Haircut, hair colouring, and smoothening services are disabled because your photo analysis shows a bald scalp. <b>Beard & Grooming</b> service is selected for you below.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {isCustomerBald && selectedGender === 'Women' && (
+          <div className="bg-red-500/10 border-2 border-red-500/80 p-4 rounded-2xl flex items-start space-x-3 text-red-200 text-xs sm:text-sm shadow-md ring-1 ring-red-500/30">
+            <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold text-red-300 block text-sm">Notice: Bald Scalp Detected</span>
+              <p className="text-slate-200 leading-relaxed">
+                Haircut, hair colouring, and smoothening services are disabled because your photo analysis shows a bald scalp.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!isCustomerBald && isCleanShaven && selectedGender !== 'Women' && (
+          <div className="bg-red-500/10 border-2 border-red-500/80 p-4 rounded-2xl flex items-start space-x-3 text-red-200 text-xs sm:text-sm shadow-md ring-1 ring-red-500/30">
+            <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold text-red-300 block text-sm">Notice: Clean-Shaven Face Detected</span>
+              <p className="text-slate-200 leading-relaxed">
+                Beard trimming & sculpting services are disabled because your photo analysis shows a clean-shaven face.
               </p>
             </div>
           </div>
@@ -193,33 +269,49 @@ export const ServiceCategoryPage: React.FC = () => {
             </span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-            {services.map((svc) => {
+            {services.filter((svc) => !(selectedGender === 'Women' && svc.id === 'Beard')).map((svc) => {
               const Icon = svc.icon;
               const isSelected = selectedServices.includes(svc.id);
-              const disabled = svc.id === 'Beard' && beardUnavailable;
+              const isHair = svc.id === 'Hair' || svc.id === 'Colour / Balayage' || svc.id === 'Keratin / Smoothening';
+              const isBeard = svc.id === 'Beard';
+              const disabled = (isCustomerBald && isHair) || ((isCleanShaven || beardUnavailable) && isBeard);
+              const disabledMsg = isCustomerBald && isHair
+                ? "Not applicable for bald scalp"
+                : (isCleanShaven && isBeard)
+                ? "Not applicable for clean-shaven face"
+                : (beardUnavailable && isBeard)
+                ? "Beard grooming is in Men's collection"
+                : undefined;
+
               return (
                 <button
                   key={svc.id}
                   onClick={() => toggleService(svc.id)}
                   disabled={disabled}
-                  title={disabled ? "Beard grooming is in the Men's collection" : undefined}
-                  className={`p-4 rounded-2xl text-left border transition-all flex flex-col justify-between touch-target-large active:scale-95 relative disabled:opacity-40 disabled:cursor-not-allowed ${
+                  title={disabledMsg}
+                  className={`p-4 rounded-2xl text-left border transition-all flex flex-col justify-between touch-target-large active:scale-95 relative disabled:opacity-30 disabled:cursor-not-allowed ${
                     isSelected
                       ? 'bg-amber-500/10 border-amber-500 text-white ring-2 ring-amber-500/30 shadow-sm'
+                      : disabled
+                      ? 'bg-slate-900/40 border-slate-800 text-slate-600'
                       : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-3">
-                    <Icon className={`w-7 h-7 ${isSelected ? 'text-amber-400' : 'text-slate-400'}`} />
-                    {isSelected && (
+                    <Icon className={`w-7 h-7 ${isSelected ? 'text-amber-400' : disabled ? 'text-slate-600' : 'text-slate-400'}`} />
+                    {isSelected ? (
                       <div className="w-5 h-5 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shadow-sm">
                         <Check className="w-3.5 h-3.5 stroke-[3]" />
                       </div>
-                    )}
+                    ) : disabled ? (
+                      <span className="text-[9px] uppercase font-bold text-red-400/90 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20">
+                        Disabled
+                      </span>
+                    ) : null}
                   </div>
                   <div>
-                    <h4 className="font-bold text-sm">{svc.title}</h4>
-                    <p className="text-[11px] text-slate-400 mt-1 leading-tight">{svc.desc}</p>
+                    <h4 className={`font-bold text-sm ${disabled ? 'text-slate-500 line-through' : 'text-white'}`}>{svc.title}</h4>
+                    <p className="text-[11px] text-slate-400 mt-1 leading-tight">{disabledMsg || svc.desc}</p>
                   </div>
                 </button>
               );
@@ -251,6 +343,58 @@ export const ServiceCategoryPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Trim / Cut Length Preference Selector */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center justify-between">
+            <span>4. Hair Cut & Trim Length Preference</span>
+            <span className="text-amber-400 font-normal text-[11px]">Specify exact length to trim</span>
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { id: '0cm', title: 'Keep Original Length', desc: '0 - 1 cm micro-trim' },
+              { id: '2cm', title: 'Slight Trim', desc: '1 - 2 cm short' },
+              { id: '5cm', title: 'Medium Cut', desc: '3 - 5 cm short' },
+              { id: 'custom', title: 'Custom Cut', desc: 'Specify cm / mm short' },
+            ].map((option) => {
+              const isSelected = trimPreference === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setTrimPreference(option.id)}
+                  className={`p-3.5 rounded-2xl text-left border transition-all touch-target-large active:scale-95 ${
+                    isSelected
+                      ? 'bg-amber-500/10 border-amber-500 text-white ring-2 ring-amber-500/30 shadow-sm'
+                      : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-xs text-amber-400">{option.title}</span>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-amber-400 stroke-[3]" />}
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-tight">{option.desc}</p>
+                </button>
+              );
+            })}
+          </div>
+          {trimPreference === 'custom' && (
+            <div className="mt-3 flex items-center gap-3 bg-slate-900/80 p-3 rounded-xl border border-slate-700">
+              <label htmlFor="custom-trim-val" className="text-xs text-slate-300 font-semibold whitespace-nowrap">Custom Trim Amount:</label>
+              <input
+                id="custom-trim-val"
+                type="text"
+                value={customTrimVal}
+                onChange={(e) => setCustomTrimVal(e.target.value)}
+                placeholder="e.g. 3 cm, 15 mm, 1 inch"
+                className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500 flex-1"
+              />
+            </div>
+          )}
+        </div>
+
+        {generateError && (
+          <div role="alert" className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300 text-center">{generateError}</div>
+        )}
         <button
           onClick={handleGenerate}
           disabled={loading}

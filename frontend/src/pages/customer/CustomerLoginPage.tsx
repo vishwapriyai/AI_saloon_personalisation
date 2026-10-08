@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Phone, Lock, ArrowRight, UserCheck, Sparkles, RefreshCw, Scissors, User, ShieldCheck, Eye, EyeOff } from 'lucide-react';
-import { customerLogin, customerRegister, getCustomerHistory, getCustomerSummary, type CustomerHistory, type CustomerLoginResult } from '../../api/client';
+import { changeCustomerPassword, customerLogin, customerRegister, getCustomerHistory, getCustomerSummary, type CustomerHistory, type CustomerLoginResult } from '../../api/client';
 import { LatestLookCard, PreviousStylesStrip } from '../../components/CustomerFullProfile';
 import { applyPreviousPhotoSession, continueTarget } from '../../utils/continueStyle';
 import { clearCustomerContext, getSession, isStaff, saveSession } from '../../auth/session';
@@ -15,6 +15,8 @@ import {
 
 const inputClass = authInput;
 const passwordInputClass = authPasswordInput;
+
+const MUST_CHANGE_KEY = 'salon_must_change_password';
 
 function readSummary(): any | null {
   try {
@@ -38,6 +40,11 @@ export const CustomerLoginPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Logged in with a temporary password from staff: a new password must be chosen before anything else
+  const [mustChange, setMustChange] = useState(() => localStorage.getItem(MUST_CHANGE_KEY) === '1');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [changedPassword, setChangedPassword] = useState('');
+  const [changedConfirm, setChangedConfirm] = useState('');
   const [storedSummary, setSummary] = useState<any | null>(() => (session?.kind === 'customer' ? readSummary() : null));
   // Shown only while a customer is logged in: after Logout this page must show the login form again
   const loggedInCustomerId = session?.kind === 'customer' ? session.customerId ?? null : null;
@@ -47,7 +54,7 @@ export const CustomerLoginPage: React.FC = () => {
 
   // Always refresh from the server so the latest chosen style shows (not the copy saved at login)
   useEffect(() => {
-    if (!loggedInCustomerId) return;
+    if (!loggedInCustomerId || mustChange) return;
     let active = true;
     getCustomerSummary(loggedInCustomerId)
       .then((res) => {
@@ -60,7 +67,7 @@ export const CustomerLoginPage: React.FC = () => {
       .then((h) => { if (active) setHistory(h); })
       .catch((err) => console.error('Could not load previous styles:', err));
     return () => { active = false; };
-  }, [loggedInCustomerId]);
+  }, [loggedInCustomerId, mustChange]);
 
   const startSession = (res: CustomerLoginResult) => {
     clearCustomerContext();
@@ -69,6 +76,32 @@ export const CustomerLoginPage: React.FC = () => {
     localStorage.setItem('salon_customer_name', res.customer.full_name);
     localStorage.setItem('salon_customer_summary', JSON.stringify(res.customer));
     setSummary(res.customer);
+    if (res.must_change_password) {
+      localStorage.setItem(MUST_CHANGE_KEY, '1');
+      setMustChange(true);
+    } else {
+      localStorage.removeItem(MUST_CHANGE_KEY);
+      setMustChange(false);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (changedPassword !== changedConfirm) {
+      setError('The two passwords do not match.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      startSession(await changeCustomerPassword(currentPassword || password, changedPassword));
+      setPassword('');
+      setCurrentPassword('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not change the password.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -137,7 +170,24 @@ export const CustomerLoginPage: React.FC = () => {
             </p>
           </div>
 
-          {summary ? (
+          {summary && mustChange ? (
+            /* TEMPORARY PASSWORD: choose your own before continuing */
+            <form onSubmit={handleChangePassword} className="space-y-4">
+              <p className="text-sm text-slate-300">Please choose your own password. The one you used was a one-time password from the salon.</p>
+              {error && <div role="alert" className={authError}>{error}</div>}
+              {!password && (
+                <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="One-time password" autoComplete="current-password" className={passwordInputClass} required />
+              )}
+              <input type="password" value={changedPassword} onChange={(e) => setChangedPassword(e.target.value)}
+                placeholder="New password (min. 8, letters and numbers)" autoComplete="new-password" minLength={8} className={passwordInputClass} required />
+              <input type="password" value={changedConfirm} onChange={(e) => setChangedConfirm(e.target.value)}
+                placeholder="Confirm new password" autoComplete="new-password" minLength={8} className={passwordInputClass} required />
+              <button type="submit" disabled={loading} className={authPrimaryButton}>
+                {loading ? <RefreshCw className="w-6 h-6 animate-spin" /> : <><span>Save Password & Continue</span><ArrowRight className="w-5 h-5" /></>}
+              </button>
+            </form>
+          ) : summary ? (
             /* LOGGED-IN CUSTOMER: previous style and next step */
             <div className="space-y-6">
               <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center space-x-4">
@@ -234,7 +284,7 @@ export const CustomerLoginPage: React.FC = () => {
                     className={authPrimaryButton}>
                     {loading ? <RefreshCw className="w-6 h-6 animate-spin" /> : <><span>Log In</span><ArrowRight className="w-5 h-5" /></>}
                   </button>
-                  <p className={authHint}>Demo: existing customers use the sample password <span className="font-mono text-slate-400">Customer@123</span></p>
+                  <p className={authHint}>Forgot your password? Ask the salon staff for a one-time password.</p>
                 </form>
               ) : (
                 <form onSubmit={handleRegister} className="space-y-4">
@@ -248,8 +298,8 @@ export const CustomerLoginPage: React.FC = () => {
                   </div>
                   <div className="relative">
                     <Lock className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
-                    <input type={showPassword ? 'text' : 'password'} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Choose a password (min. 6 characters)"
-                      autoComplete="new-password" minLength={6} className={passwordInputClass} required />
+                    <input type={showPassword ? 'text' : 'password'} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Choose a password (min. 8, letters and numbers)"
+                      autoComplete="new-password" minLength={8} className={passwordInputClass} required />
                       <button type="button" onClick={() => setShowPassword((v) => !v)}
                         className={authEyeButton}
                         aria-label={showPassword ? 'Hide password' : 'Show password'}>
@@ -259,7 +309,7 @@ export const CustomerLoginPage: React.FC = () => {
                   <div className="relative">
                     <Lock className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                     <input type={showPassword ? 'text' : 'password'} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Confirm password"
-                      autoComplete="new-password" minLength={6} className={passwordInputClass} required />
+                      autoComplete="new-password" minLength={8} className={passwordInputClass} required />
                       <button type="button" onClick={() => setShowPassword((v) => !v)}
                         className={authEyeButton}
                         aria-label={showPassword ? 'Hide password' : 'Show password'}>

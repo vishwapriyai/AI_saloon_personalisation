@@ -19,7 +19,7 @@ const SESSION_DATA_KEYS = [
   'salon_customer_id', 'salon_customer_name', 'salon_customer_summary', 'salon_photo_id',
   'salon_original_image_url', 'salon_recommendation_id', 'salon_recommended_styles',
   'salon_generated_results', 'salon_generation_pending', 'salon_selected_style', 'salon_selection_id',
-  'salon_last_hairstyle_id', 'salon_staff_user', 'salon_photo_analysis',
+  'salon_last_hairstyle_id', 'salon_staff_user', 'salon_photo_analysis', 'salon_must_change_password',
 ];
 
 export function getSession(): Session | null {

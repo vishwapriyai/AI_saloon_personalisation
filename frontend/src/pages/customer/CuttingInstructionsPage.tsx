@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Scissors, Volume2, CheckCircle, Square, AlertTriangle, ShieldCheck, Beaker, Languages, RefreshCw, Camera, Play } from 'lucide-react';
 import { getInstructions, getInstructionAudio, getSelectionComparison, confirmHaircut } from '../../api/client';
 import type { InstructionLanguage, PhotoView, SelectionComparison } from '../../api/client';
+import { getSession, isStaff } from '../../auth/session';
+import { StaffApproval } from '../../components/StaffApproval';
 
 const LANGUAGE_OPTIONS: { code: InstructionLanguage; label: string; speech: string }[] = [
   { code: 'en', label: 'English', speech: 'en-IN' },
@@ -32,6 +34,8 @@ export const CuttingInstructionsPage: React.FC = () => {
   const [haircutConfirmed, setHaircutConfirmed] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  // Confirming the haircut is a stylist's action: on a customer's own session a stylist signs in for it
+  const needsStylist = !isStaff(getSession());
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
 
@@ -93,6 +97,7 @@ export const CuttingInstructionsPage: React.FC = () => {
         const c = await getSelectionComparison(selectionId);
         if (cancelled) return;
         setComparison(c);
+        if (c.haircut_confirmed) setHaircutConfirmed(true);
         const wanted: PhotoView[] = c.style.service === 'Beard' ? ['side'] : ['side', 'back'];
         const pending = wanted.filter((v) => c.before[v] && !c.ai[v]);
         if (!pending.length) return;
@@ -151,12 +156,12 @@ export const CuttingInstructionsPage: React.FC = () => {
     }
   };
 
-  const handleConfirmHaircut = async () => {
+  const handleConfirmHaircut = async (staffToken?: string) => {
     if (!selectionId) { navigate('/customer/confirmation'); return; }
     setConfirming(true);
     setConfirmError(null);
     try {
-      await confirmHaircut(selectionId, language);
+      await confirmHaircut(selectionId, language, staffToken);
       setHaircutConfirmed(true);
     } catch (e) {
       setConfirmError(e instanceof Error ? e.message : 'Could not confirm the haircut');
@@ -261,17 +266,19 @@ export const CuttingInstructionsPage: React.FC = () => {
           {VIEWS.map(({ key, label }) => {
             const img = viewImage(key);
             const status = viewStatus(key);
+            const hasError = comparison?.errors?.[key];
             return (
               <div key={key}>
                 <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wide block mb-1">{label}</span>
-                <div className="rounded-2xl overflow-hidden aspect-[4/5] bg-slate-950 border border-slate-700 flex items-center justify-center">
+                <div className="rounded-2xl overflow-hidden aspect-[4/5] bg-slate-950 border border-slate-700 flex flex-col items-center justify-center p-2 text-center">
                   {img ? (
                     <img src={img} alt={`${label} AI preview`} className="w-full h-full object-contain" />
                   ) : (
-                    <span className="text-[11px] text-slate-500 text-center px-2 flex items-center gap-1.5">
-                      {status === 'Generating...' && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                      {status}
-                    </span>
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <RefreshCw className={`w-5 h-5 ${status === 'Generating...' ? 'animate-spin text-amber-400' : 'text-slate-500'}`} />
+                      <span className="text-[11px] text-slate-300 font-semibold">{hasError ? 'Preview Failed' : status}</span>
+                      {hasError && <p className="text-[9px] text-slate-400 line-clamp-2">{hasError}</p>}
+                    </div>
                   )}
                 </div>
               </div>
@@ -330,14 +337,18 @@ export const CuttingInstructionsPage: React.FC = () => {
               </div>
               <p className="text-xs text-slate-400">Stylist and customer agree on this look and these steps. Confirm to start the service.</p>
               {confirmError && <p role="alert" className="text-xs text-rose-300">{confirmError}</p>}
-              <button
-                onClick={handleConfirmHaircut}
-                disabled={confirming}
-                className="w-full font-bold py-4 rounded-2xl text-base shadow-sm active:scale-95 transition-all flex items-center justify-center space-x-2 touch-target-large bg-emerald-600 hover:bg-emerald-700 text-slate-950 disabled:opacity-60"
-              >
-                {confirming ? <RefreshCw className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
-                <span>Confirm Haircut & Start Service</span>
-              </button>
+              {needsStylist ? (
+                <StaffApproval action="confirm the haircut and start the service" onApproved={(token) => handleConfirmHaircut(token)} />
+              ) : (
+                <button
+                  onClick={() => handleConfirmHaircut()}
+                  disabled={confirming}
+                  className="w-full font-bold py-4 rounded-2xl text-base shadow-sm active:scale-95 transition-all flex items-center justify-center space-x-2 touch-target-large bg-emerald-600 hover:bg-emerald-700 text-slate-950 disabled:opacity-60"
+                >
+                  {confirming ? <RefreshCw className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
+                  <span>Confirm Haircut & Start Service</span>
+                </button>
+              )}
             </>
           ) : (
             <>

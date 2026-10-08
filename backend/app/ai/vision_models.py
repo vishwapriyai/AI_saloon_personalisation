@@ -209,13 +209,13 @@ def hair_colour_name(lab: Optional[np.ndarray]) -> str:
         return UNKNOWN
     L, a, b = (float(v) for v in lab)
     chroma = float(np.hypot(a, b))
-    if L < 22:
-        return "Black"
-    if L < 35:
-        return "Dark Auburn" if a > 12 and chroma > 18 else "Dark Brown"
-    if L < 50:
-        return "Auburn" if a > 15 else "Brown"
-    if L < 65:
+    if L < 38:
+        return "Dark Auburn" if a > 14 and chroma > 20 else "Black"
+    if L < 48:
+        return "Auburn" if a > 15 else "Dark Brown"
+    if L < 62:
+        return "Grey" if chroma < 8 else "Brown"
+    if L < 75:
         return "Grey" if chroma < 8 else "Light Brown"
     return "Grey / White" if chroma < 8 else "Blonde"
 
@@ -264,9 +264,7 @@ def hair_length(mask: np.ndarray, face: FaceGeometry) -> tuple[str, float]:
     visible = int(mask.sum())
     if visible < 0.05 * face.width ** 2:
         return "Bald", 0.95
-    if visible < 0.6 * face.width ** 2:
-        # Little hair visible from the front: tied back, covered, or close-cropped. Real length can't be judged.
-        return UNKNOWN, 0.0
+
     n, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), 8)
     keep = np.zeros_like(mask)
     for i in range(1, n):
@@ -284,6 +282,46 @@ def hair_length(mask: np.ndarray, face: FaceGeometry) -> tuple[str, float]:
     if r < 2.6:
         return "Long", 0.7
     return "Very Long", 0.6
+
+
+# Bald vs buzz cut: the hair segmenter often misses stubble-length scalp hair, so the scalp above the forehead
+# is also compared with forehead skin. Tuned on the cases in tests; confirm on real photos (see golden-set notes).
+# Band from 0.38 to 0.15 face heights above the mid-forehead landmark: on the scalp for most heads, but low
+# enough not to reach the background above the crown (a dark background would look like hair)
+SCALP_BAND = (0.38, 0.15)
+SCALP_HALF_WIDTH = 0.30          # band half-width, in face widths
+BUZZ_MIN_MASK_COVER = 0.25       # share of the band the hair mask covers -> short hair present
+BUZZ_MIN_DARKER_L = 12.0         # scalp this much darker (L*) than forehead skin -> short dark hair present
+
+
+def scalp_hair(rgb: np.ndarray, mask: np.ndarray, face: FaceGeometry) -> tuple[str, float]:
+    """
+    For photos where little hair is segmented: "Buzz" (very short hair covers the scalp) or "Bald".
+    Light hair on light skin cannot be told from a bare scalp, so "Bald" has moderate confidence and should be
+    confirmed by the stylist.
+    """
+    fh, fw = face.height, face.width
+    h, w = mask.shape[:2]
+    y0 = int(max(0, face.top_y - SCALP_BAND[0] * fh))
+    y1 = int(max(0, face.top_y - SCALP_BAND[1] * fh))
+    x0 = int(max(0, face.center_x - SCALP_HALF_WIDTH * fw))
+    x1 = int(min(w, face.center_x + SCALP_HALF_WIDTH * fw))
+    if y1 - y0 < 4 or x1 - x0 < 4:
+        return UNKNOWN, 0.0  # the photo is cut off above the forehead
+    band_cover = float(mask[y0:y1, x0:x1].mean())
+    if band_cover >= BUZZ_MIN_MASK_COVER:
+        return "Buzz", 0.7
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)
+    scalp_l = float(np.median(lab[y0:y1, x0:x1, 0])) * 100.0 / 255.0
+    fx, fy = (int(v) for v in face.pt(LM_FOREHEAD_CENTER[1]))
+    r = max(3, int(fw * 0.05))
+    skin = lab[max(0, fy - r):fy + r, max(0, fx - r):fx + r, 0]
+    if skin.size == 0:
+        return UNKNOWN, 0.0
+    skin_l = float(np.median(skin)) * 100.0 / 255.0
+    if skin_l - scalp_l >= BUZZ_MIN_DARKER_L:
+        return "Buzz", 0.6
+    return "Bald", 0.6
 
 
 def face_shape(face: FaceGeometry) -> tuple[str, float, dict]:

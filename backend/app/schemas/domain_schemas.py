@@ -21,6 +21,8 @@ class CustomerResponse(CustomerBase):
     total_spent: float
     last_visit_date: Optional[datetime] = None
     created_at: datetime
+    profile_label: Optional[str] = None
+    temporary_password: Optional[str] = None  # only in the response that creates the customer
 
     class Config:
         from_attributes = True
@@ -33,7 +35,21 @@ class PhotoUploadResponse(BaseModel):
     hair_length: str
     hair_density: str
     beard_style_current: str
+    beard_length_class: Optional[str] = "Clean-shaven"
+    beard_pattern: Optional[str] = "None"
+    beard_zones: Optional[Dict[str, Any]] = None
+    eligible_services: Optional[Dict[str, Any]] = None
+    needs_confirmation: bool = False
     facial_features: Dict[str, Any]
+
+class PhotoAnalysisUpdate(BaseModel):
+    face_shape: Optional[str] = None
+    hair_length: Optional[str] = None
+    hair_density: Optional[str] = None
+    beard_style_current: Optional[str] = None
+    beard_length_class: Optional[str] = None
+    beard_pattern: Optional[str] = None
+    beard_zones: Optional[Dict[str, Any]] = None
 
 # 3. Recommendation Request & Response
 class RecommendationRequest(BaseModel):
@@ -42,6 +58,7 @@ class RecommendationRequest(BaseModel):
     target_service_type: str = Field(..., description="Hair, Beard, Hair + Beard, Shaving")
     style_category: str = Field(..., description="Classic, Trendy, Professional")
     gender: Optional[str] = Field("Women", description="Women, Men, All")
+    trim_preference: Optional[str] = Field(None, description="0cm, 2cm, 5cm, 10cm, keep")
 
 class StyleItem(BaseModel):
     style_id: int
@@ -69,11 +86,14 @@ class RecommendationResponse(BaseModel):
     target_service_type: str
     style_category: str
     recommended_styles: List[StyleItem]
+    eligible_services: Optional[Dict[str, Any]] = None
+    stylist_assist_required: bool = False
 
 # 4. Generation Request & Status
 class GenerationRequest(BaseModel):
     recommendation_id: int
     selected_style_ids: List[int]  # Top 8 or selected styles
+    trim_preference: Optional[str] = Field(None, description="0cm, 2cm, 5cm, 10cm, keep")
 
 class GenerationStatusItem(BaseModel):
     style_id: int

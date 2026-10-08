@@ -1,60 +1,89 @@
-from typing import List, Dict, Any
+from datetime import datetime, timedelta
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+HOURS = list(range(9, 21))  # 9 AM to 8 PM
+DEFAULT_SERVICE_MINUTES = 45
+PEAK_PCT = 80.0
+LEAN_PCT = 40.0
+
+
+def _hour_label(hour: int) -> str:
+    def fmt(h: int) -> str:
+        return f"{(h - 1) % 12 + 1}:00 {'AM' if h < 12 else 'PM'}"
+    return f"{fmt(hour)} - {fmt(hour + 1)}"
+
 
 class CapacityAnalyticsEngine:
     """
-    Salon Dual-Resource Capacity & Utilization Analytics engine.
-    Models Chair bandwidth + Stylist skill availability + Active vs Idle chemical stage times
-    to identify peak/lean periods, hourly utilization, and operational bottlenecks.
+    Chair utilisation per weekday and hour, computed from completed visits.
+
+    Utilisation of a slot = chair-minutes used in that slot / chair-minutes available
+    (chairs x 60 minutes x number of times that weekday occurred in the period).
+    A visit without start/end times counts as DEFAULT_SERVICE_MINUTES from its visit time.
     """
-    def __init__(self, total_chairs: int = 8, active_stylists: int = 6):
-        self.total_chairs = total_chairs
-        self.active_stylists = active_stylists
-        self.days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        self.hours = list(range(9, 21))  # 9 AM to 8 PM
 
-    def get_traffic_heatmap(self) -> List[Dict[str, Any]]:
-        """
-        Generates 7x12 traffic matrix with Dual-Resource Chair & Stylist utilization metrics.
-        """
+    def get_traffic_heatmap(self, visits: Iterable[Tuple[datetime, Optional[datetime], Optional[datetime]]],
+                            total_chairs: int, start: datetime, end: datetime) -> List[Dict[str, Any]]:
+        """visits: (visit_date, service_start_time, service_end_time) of completed visits in [start, end)."""
+        used: Dict[Tuple[int, int], float] = {}
+        count: Dict[Tuple[int, int], int] = {}
+        for visit_date, began, ended in visits:
+            began = began or visit_date
+            if began is None:
+                continue
+            ended = ended if ended and ended > began else began + timedelta(minutes=DEFAULT_SERVICE_MINUTES)
+            count[(began.weekday(), began.hour)] = count.get((began.weekday(), began.hour), 0) + 1
+            t = began
+            while t < ended:  # spread the service over the hour slots it occupies
+                slot_end = min(ended, t.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
+                key = (t.weekday(), t.hour)
+                used[key] = used.get(key, 0.0) + (slot_end - t).total_seconds() / 60.0
+                t = slot_end
+
+        occurrences = [0] * 7
+        day = start.date()
+        while day < end.date():
+            occurrences[day.weekday()] += 1
+            day += timedelta(days=1)
+
         result = []
-        for day in self.days:
-            for hour in self.hours:
-                is_weekend = day in ["Saturday", "Sunday"]
-                is_peak_hour = 16 <= hour <= 19
-
-                if is_weekend and is_peak_hour:
-                    chair_util = 92.0
-                    stylist_util = 96.0
-                    traffic = 14
-                    bottleneck = "Stylist Availability"
-                elif is_weekend or is_peak_hour:
-                    chair_util = 75.0
-                    stylist_util = 82.0
-                    traffic = 9
-                    bottleneck = "Chair Capacity"
-                elif 11 <= hour <= 15 and day in ["Monday", "Tuesday", "Wednesday"]:
-                    chair_util = 28.0  # Lean hours
-                    stylist_util = 35.0
-                    traffic = 3
-                    bottleneck = "Low Demand"
-                else:
-                    chair_util = 50.0
-                    stylist_util = 58.0
-                    traffic = 6
-                    bottleneck = "Optimal Balance"
-
+        chairs = max(1, total_chairs)
+        for d, name in enumerate(DAYS):
+            for hour in HOURS:
+                available = chairs * 60.0 * max(1, occurrences[d])
+                pct = round(min(100.0, 100.0 * used.get((d, hour), 0.0) / available), 1)
                 result.append({
-                    "day": day,
+                    "day": name,
                     "hour": hour,
-                    "traffic": traffic,
-                    "utilization_pct": chair_util,
-                    "chair_utilization_pct": chair_util,
-                    "stylist_utilization_pct": stylist_util,
-                    "bottleneck_resource": bottleneck,
-                    "is_lean": chair_util < 40.0,
-                    "is_peak": chair_util > 80.0
+                    "traffic": count.get((d, hour), 0),
+                    "utilization_pct": pct,
+                    "chair_utilization_pct": pct,
+                    "is_lean": pct < LEAN_PCT,
+                    "is_peak": pct > PEAK_PCT,
                 })
         return result
 
-capacity_engine = CapacityAnalyticsEngine()
+    @staticmethod
+    def summary(heatmap: List[Dict[str, Any]]) -> Dict[str, Any]:
+        by_hour: Dict[int, List[float]] = {}
+        for cell in heatmap:
+            by_hour.setdefault(cell["hour"], []).append(cell["utilization_pct"])
+        hourly = sorted(((sum(v) / len(v), h) for h, v in by_hour.items()), reverse=True)
+        busy = [h for avg, h in hourly if avg > 0]
+        return {
+            "peak_hours": [_hour_label(h) for _, h in hourly[:3] if h in busy],
+            "lean_hours": [_hour_label(h) for _, h in sorted(hourly)[:3]],
+            "avg_chair_utilization_pct": round(sum(c["utilization_pct"] for c in heatmap) / len(heatmap), 1) if heatmap else 0.0,
+            "has_data": any(c["traffic"] for c in heatmap),
+        }
 
+    @staticmethod
+    def slot_utilization(heatmap: List[Dict[str, Any]], day: str, hour: int) -> Optional[float]:
+        for cell in heatmap:
+            if cell["day"].lower() == (day or "").lower() and cell["hour"] == hour:
+                return cell["utilization_pct"]
+        return None
+
+
+capacity_engine = CapacityAnalyticsEngine()

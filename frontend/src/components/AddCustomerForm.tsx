@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Camera, Upload, UserPlus, RefreshCw, X } from 'lucide-react';
+import { Camera, Upload, UserPlus, RefreshCw, X, KeyRound } from 'lucide-react';
 import { createCustomer, uploadCustomerAvatar } from '../api/client';
 import { CameraCapture } from './CameraCapture';
 import { workBranchId } from '../utils/workBranch';
@@ -22,6 +22,8 @@ export const AddCustomerForm: React.FC<Props> = ({ initialQuery = '', onCreated,
   const [phone, setPhone] = useState(looksLikePhone ? digits.slice(-10) : '');
   const [code, setCode] = useState(/^cust-/i.test(initialQuery.trim()) ? initialQuery.trim().toUpperCase() : '');
   const [gender, setGender] = useState('');
+  const [profileLabel, setProfileLabel] = useState('Self');
+  const [created, setCreated] = useState<any | null>(null);
   const [email, setEmail] = useState('');
   const [dob, setDob] = useState('');
   const [photo, setPhoto] = useState<File | null>(null);
@@ -46,7 +48,7 @@ export const AddCustomerForm: React.FC<Props> = ({ initialQuery = '', onCreated,
       const customer = await createCustomer({
         full_name: fullName.trim(), phone_number: phone, customer_code: code.trim() || undefined,
         gender: gender || undefined, email: email.trim() || undefined, date_of_birth: dob || undefined,
-        branch_id: workBranchId(),
+        branch_id: workBranchId(), profile_label: profileLabel,
       });
       if (photo) {
         try {
@@ -56,7 +58,7 @@ export const AddCustomerForm: React.FC<Props> = ({ initialQuery = '', onCreated,
           console.error('Customer saved, photo upload failed:', err);
         }
       }
-      onCreated(customer);
+      setCreated(customer);  // show the one-time password before moving on
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add the customer');
     } finally {
@@ -64,12 +66,27 @@ export const AddCustomerForm: React.FC<Props> = ({ initialQuery = '', onCreated,
     }
   };
 
+  if (created) {
+    return (
+      <div className="space-y-5 text-center">
+        <KeyRound className="w-10 h-10 text-amber-400 mx-auto" />
+        <h2 className="text-xl font-bold text-white">{created.full_name} added ({created.customer_code})</h2>
+        <p className="text-sm text-slate-300">Give this one-time password to the customer. They choose their own password at first login. It is shown only once.</p>
+        <p className="font-mono text-2xl tracking-widest text-amber-300 bg-slate-950 border border-slate-700 rounded-2xl py-4 select-all">{created.temporary_password}</p>
+        <button type="button" onClick={() => onCreated({ ...created, temporary_password: undefined })}
+          className="w-full min-h-[56px] rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-lg">
+          Continue
+        </button>
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={submit} className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-white flex items-center gap-2"><UserPlus className="w-5 h-5 text-amber-400" /> Add New Customer</h2>
-          <p className="text-xs text-slate-400 mt-1">Customer ID is created automatically if left empty. The customer can log in with the sample password and change it later.</p>
+          <p className="text-xs text-slate-400 mt-1">Customer ID is created automatically if left empty. A one-time password is shown after saving.</p>
         </div>
         <button type="button" onClick={onCancel} className="p-3 rounded-xl bg-slate-900 border border-slate-700 text-slate-300 hover:text-white" aria-label="Cancel">
           <X className="w-5 h-5" />
@@ -121,6 +138,16 @@ export const AddCustomerForm: React.FC<Props> = ({ initialQuery = '', onCreated,
               <option value="Female">Female</option>
               <option value="Male">Male</option>
               <option value="Other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label className={label} htmlFor="nc-profile">Profile</label>
+            <select id="nc-profile" value={profileLabel} onChange={(e) => setProfileLabel(e.target.value)} className={field}>
+              <option value="Self">Self (owner of the number)</option>
+              <option value="Spouse">Spouse</option>
+              <option value="Child">Child (needs a parent's consent for photos)</option>
+              <option value="Parent">Parent</option>
+              <option value="Other">Other family member</option>
             </select>
           </div>
           <div>

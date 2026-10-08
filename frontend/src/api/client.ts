@@ -6,7 +6,8 @@ const API_BASE = '/api/v1';
 async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
   const session = getSession();
   const headers = new Headers(init.headers);
-  if (session?.token) headers.set('Authorization', `Bearer ${session.token}`);
+  // A call may carry its own token (a stylist approving on a customer's session); otherwise use the session's
+  if (session?.token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${session.token}`);
   const res = await fetch(input, { ...init, headers });
   if (res.status === 401) {
     clearSession();
@@ -52,6 +53,72 @@ export interface CustomerLoginResult {
   role: string;
   found: boolean;
   customer: any;
+  must_change_password?: boolean;
+}
+
+/** Customer replaces a temporary password from staff (or changes their own). */
+export async function changeCustomerPassword(currentPassword: string, newPassword: string) {
+  const res = await apiFetch(`${API_BASE}/auth/customer/change-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res, 'Could not change the password'));
+  return res.json();
+}
+
+/** Staff: a stylist's own token for one approval on a customer's tablet session (not stored on the device). */
+export async function staffApprovalToken(username: string, password: string): Promise<string> {
+  return (await salonLogin(username, password)).access_token;
+}
+
+/** Staff: issue a new one-time password for a customer (shown once). */
+export async function resetCustomerPassword(customerId: number): Promise<{ temporary_password: string; customer_code: string }> {
+  const res = await apiFetch(`${API_BASE}/customers/${customerId}/reset-password`, { method: 'POST' });
+  if (!res.ok) throw new Error(await errorDetail(res, 'Could not reset the password'));
+  return res.json();
+}
+
+export interface ConsentState {
+  customer_id: number;
+  policy_version: string;
+  recorded: boolean;
+  is_minor: boolean;
+  consent_photo_analysis: boolean;
+  consent_third_party_ai: boolean;
+  consent_history_retention: boolean;
+  consent_before_after_share: boolean;
+  consent_marketing: boolean;
+  is_minor_parental_consent: boolean;
+  recorded_by: string | null;
+  updated_at: string | null;
+  missing: string | null;
+}
+
+export type ConsentChoices = Pick<ConsentState, 'consent_photo_analysis' | 'consent_third_party_ai' |
+  'consent_history_retention' | 'consent_before_after_share' | 'consent_marketing' | 'is_minor_parental_consent'>;
+
+export async function getConsent(customerId: number): Promise<ConsentState> {
+  const res = await apiFetch(`${API_BASE}/customers/${customerId}/consent`);
+  if (!res.ok) throw new Error(await errorDetail(res, 'Could not load the consent details'));
+  return res.json();
+}
+
+export async function saveConsent(customerId: number, choices: ConsentChoices): Promise<ConsentState> {
+  const res = await apiFetch(`${API_BASE}/customers/${customerId}/consent`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(choices),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res, 'Could not save the consent'));
+  return res.json();
+}
+
+/** Deletes all of the customer's photos, AI previews and face measurements (visits are kept). */
+export async function eraseCustomerPhotos(customerId: number) {
+  const res = await apiFetch(`${API_BASE}/customers/${customerId}/photos`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(await errorDetail(res, 'Could not delete the photos'));
+  return res.json();
 }
 
 export async function customerLogin(identifier: string, password: string): Promise<CustomerLoginResult> {
@@ -179,6 +246,7 @@ export interface NewCustomer {
   gender?: string;
   date_of_birth?: string;
   branch_id?: number | null;
+  profile_label?: string;
 }
 
 /** Staff: add a walk-in customer (Customer ID is generated when left empty). */
@@ -208,8 +276,10 @@ export async function getBranches(): Promise<{ home_branch_id: number | null; br
   return res.json();
 }
 
-/** Stylist confirms hair density / corrects hair length before recommendations. */
-export async function confirmPhotoAnalysis(photoId: number, data: { hair_density?: string; hair_length?: string }) {
+export type AnalysisField = 'hair_density' | 'hair_length' | 'hair_type' | 'beard_style_current' | 'beard_length_class' | 'beard_pattern' | 'beard_zones' | 'face_shape';
+
+/** Stylist (or customer) confirms or corrects the photo analysis before recommendations. */
+export async function confirmPhotoAnalysis(photoId: number, data: Partial<Record<AnalysisField, string>>) {
   const res = await apiFetch(`${API_BASE}/photos/${photoId}/analysis`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -247,13 +317,14 @@ export async function getRecommendations(payload: {
   target_service_type: string;
   style_category: string;
   gender?: string;
+  trim_preference?: string;
 }) {
   const res = await apiFetch(`${API_BASE}/style-recommendations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to fetch recommendations');
+  if (!res.ok) throw new Error(await errorDetail(res, 'Failed to fetch recommendations'));
   return res.json();
 }
 
@@ -261,13 +332,14 @@ export async function getRecommendations(payload: {
 export async function generateStyleImages(payload: {
   recommendation_id: number;
   selected_style_ids: number[];
+  trim_preference?: string;
 }) {
   const res = await apiFetch(`${API_BASE}/style-generations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to generate styles');
+  if (!res.ok) throw new Error(await errorDetail(res, 'Failed to generate styles'));
   return res.json();
 }
 
@@ -283,7 +355,7 @@ export async function saveSelection(payload: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to save selection');
+  if (!res.ok) throw new Error(await errorDetail(res, 'Failed to save selection'));
   return res.json();
 }
 
@@ -399,7 +471,7 @@ export async function recommendOffer(payload: { customer_id: number; service_id:
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to calculate recommended offer');
+  if (!res.ok) throw new Error(await errorDetail(res, 'Failed to calculate recommended offer'));
   return res.json();
 }
 
@@ -410,6 +482,7 @@ export type ViewSet = Record<PhotoView, string | null>;
 export interface SelectionComparison {
   selection_id: number;
   status: string;
+  haircut_confirmed?: boolean;
   style: { id: number | null; name: string | null; service: string; hair_length?: string };
   before: ViewSet;
   ai: ViewSet;
@@ -433,13 +506,14 @@ export async function getSelectionComparison(selectionId: number): Promise<Selec
 
 /** After the haircut: actual photos (front required) + rating; records the visit. */
 export async function completeSelection(selectionId: number, photos: Partial<Record<PhotoView, File | null>>, rating: number,
-  extra: { branch_id?: number | null; language?: string | null } = {}): Promise<SelectionComparison> {
+  extra: { branch_id?: number | null; language?: string | null; staffToken?: string | null } = {}): Promise<SelectionComparison> {
   const form = new FormData();
   (['front', 'side', 'back'] as PhotoView[]).forEach((v) => { const f = photos[v]; if (f) form.append(`${v}_file`, f); });
   form.append('rating', String(rating));
   if (extra.branch_id) form.append('branch_id', String(extra.branch_id));
   if (extra.language) form.append('language', extra.language);
-  const res = await apiFetch(`${API_BASE}/style-selections/${selectionId}/complete`, { method: 'POST', body: form });
+  const headers: Record<string, string> = extra.staffToken ? { Authorization: `Bearer ${extra.staffToken}` } : {};
+  const res = await apiFetch(`${API_BASE}/style-selections/${selectionId}/complete`, { method: 'POST', body: form, headers });
   if (!res.ok) throw new Error(await errorDetail(res, 'Could not save the finished haircut photos'));
   return res.json();
 }
@@ -447,10 +521,10 @@ export async function completeSelection(selectionId: number, photos: Partial<Rec
 export type InstructionLanguage = 'en' | 'hi' | 'ta';
 
 /** Stylist confirms the look and starts the haircut (records the instruction language). */
-export async function confirmHaircut(selectionId: number, language: InstructionLanguage) {
+export async function confirmHaircut(selectionId: number, language: InstructionLanguage, staffToken?: string | null) {
   const res = await apiFetch(`${API_BASE}/style-selections/${selectionId}/confirm-haircut`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(staffToken ? { Authorization: `Bearer ${staffToken}` } : {}) },
     body: JSON.stringify({ language }),
   });
   if (!res.ok) throw new Error(await errorDetail(res, 'Could not confirm the haircut'));

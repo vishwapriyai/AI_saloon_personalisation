@@ -73,17 +73,10 @@ export const AppRoutes: React.FC = () => {
         <Route path="dashboard" element={<AdminDashboardPage />} />
         <Route path="customers" element={<CustomersPage />} />
         <Route path="customers/:id" element={<CustomersPage />} />
-        <Route path="styles" element={<RecommendationsPage />} />
         <Route path="analytics/capacity" element={<CapacityAnalyticsPage />} />
-        <Route path="analytics/peak-hours" element={<CapacityAnalyticsPage />} />
-        <Route path="analytics/customers" element={<CustomersPage />} />
-        <Route path="analytics/services" element={<AdminDashboardPage />} />
         <Route path="campaigns" element={<CampaignsPage />} />
-        <Route path="coupons" element={<CampaignsPage />} />
-        <Route path="referrals" element={<CustomerHistoryPage />} />
-        <Route path="membership" element={<CustomerProfilePage />} />
-        <Route path="loyalty" element={<CustomerProfilePage />} />
-        <Route path="settings" element={<AdminDashboardPage />} />
+        {/* Catalogue, referrals, membership, loyalty and settings pages are not built yet */}
+        <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
       </Route>
       </Route>
 

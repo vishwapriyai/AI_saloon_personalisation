@@ -24,6 +24,10 @@ export const RequireAuth: React.FC<{ need: Need }> = ({ need }) => {
   if (need === 'staff' && !isStaff(session)) {
     return <Navigate to="/customer/login" replace />;
   }
+  if (session.kind === 'customer' && localStorage.getItem('salon_must_change_password') === '1') {
+    // A temporary password must be replaced first (the server enforces this too)
+    return <Navigate to="/customer/login" replace />;
+  }
   if (need === 'customer-area' && isStaff(session) && !localStorage.getItem('salon_customer_id')) {
     // Staff must pick which customer they are serving first
     return <Navigate to="/stylist/customers" replace />;

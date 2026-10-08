@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, RefreshCw, UserPlus, Phone, ChevronRight, ArrowLeft, UserCheck, Sparkles, IdCard } from 'lucide-react';
-import { getCustomerHistory, getCustomers, type CustomerHistory } from '../../api/client';
+import { Search, RefreshCw, UserPlus, Phone, ChevronRight, ArrowLeft, UserCheck, Sparkles, IdCard, KeyRound } from 'lucide-react';
+import { getCustomerHistory, getCustomers, resetCustomerPassword, type CustomerHistory } from '../../api/client';
 import { CustomerSummaryCard } from '../../components/CustomerInsights';
 import { CustomerFullProfile, LatestLookCard, PreviousStylesStrip, type RepeatableStyle } from '../../components/CustomerFullProfile';
 import { AddCustomerForm } from '../../components/AddCustomerForm';
@@ -26,6 +26,18 @@ export const StaffCustomersPage: React.FC = () => {
   const [adding, setAdding] = useState(false);
   const [history, setHistory] = useState<CustomerHistory | null>(null);
   const [showFullProfile, setShowFullProfile] = useState(false);
+  const [oneTimePassword, setOneTimePassword] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
+
+  const resetPassword = async (customer: any) => {
+    if (!window.confirm(`Issue a new one-time password for ${customer.full_name}? Their current password stops working.`)) return;
+    setResetError(null);
+    try {
+      setOneTimePassword((await resetCustomerPassword(customer.id)).temporary_password);
+    } catch (e) {
+      setResetError(e instanceof Error ? e.message : 'Could not reset the password');
+    }
+  };
 
   useEffect(() => {
     const handleBranchChange = (e: Event) => {
@@ -39,6 +51,8 @@ export const StaffCustomersPage: React.FC = () => {
   useEffect(() => {
     setHistory(null);
     setShowFullProfile(false);
+    setOneTimePassword(null);
+    setResetError(null);
     if (!selected) return;
     let active = true;
     getCustomerHistory(selected.id)
@@ -139,6 +153,17 @@ export const StaffCustomersPage: React.FC = () => {
             <IdCard className="w-6 h-6 text-sky-400" />
             <span>{showFullProfile ? 'Show Summary' : 'View Full Profile'}</span>
           </button>
+        </div>
+
+        <div className="pt-2 border-t border-slate-700/60 flex flex-wrap items-center gap-3">
+          <button type="button" onClick={() => resetPassword(selected)}
+            className="min-h-[44px] px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-sm font-semibold flex items-center gap-2">
+            <KeyRound className="w-4 h-4 text-amber-400" /> Forgot password? Issue one-time password
+          </button>
+          {oneTimePassword && (
+            <span className="text-sm text-slate-300">One-time password (shown once): <b className="font-mono text-amber-300 select-all">{oneTimePassword}</b></span>
+          )}
+          {resetError && <span role="alert" className="text-sm text-rose-300">{resetError}</span>}
         </div>
       </div>
     );
