@@ -66,6 +66,13 @@ export const PhotoUploadPage: React.FC = () => {
           </p>
         </div>
 
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-200 flex items-start gap-2.5">
+          <span className="text-base leading-none">💡</span>
+          <div>
+            <strong className="text-amber-400 font-semibold">Photo Advice:</strong> Women should take the <strong>Front photo in free / loose hair</strong> (let down, not tied back in clips or ponytails) for accurate face shape framing & AI hairstyle generation.
+          </div>
+        </div>
+
         <MultiViewCapture photos={photos} required={['front', 'back']} onChange={(view, file) => setPhotos((p) => ({ ...p, [view]: file }))} />
 
         <ConsentPanel state={consent} choices={choices} onChange={setChoices} staff={staff} />

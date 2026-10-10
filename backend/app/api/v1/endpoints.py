@@ -1508,9 +1508,12 @@ async def generate_selection_views(selection_id: int, db: Session = Depends(get_
         analysis["front_preview_url"] = selection.reference_image_url
     existing = {p.view for p in db.query(ServicePhoto).filter(ServicePhoto.selection_id == selection.id,
                                                               ServicePhoto.stage == "ai").all()}
-    sources = {"side": photo.side_image_url, "back": photo.back_image_url}
+    sources = {
+        "side": photo.side_image_url or photo.original_image_url,
+        "back": photo.back_image_url or photo.original_image_url,
+    }
     if style.get("service") == "Beard":
-        sources.pop("back")  # a beard is not visible from behind
+        sources.pop("back", None)  # a beard is not visible from behind
     errors = {}
 
     async def one(view: str, url: str):

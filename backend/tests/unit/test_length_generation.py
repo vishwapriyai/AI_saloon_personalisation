@@ -111,7 +111,7 @@ def test_view_prompt_uses_the_target_length_not_the_current_one():
 # ---------------------------------------------------------------- gender from the customer, not the style
 def test_women_get_the_no_facial_hair_rule_on_unisex_looks():
     unisex = next(s for s in ALL_STYLES if s.get("gender") == "Unisex" and s.get("service") == "Hair")
-    assert "FEMALE CUSTOMER" in prompt_engine.build_prompt(LONG_WOMAN, unisex).upper()
+    assert "IS A WOMAN" in prompt_engine.build_prompt(LONG_WOMAN, unisex).upper()
     assert "FEMALE" not in prompt_engine.build_prompt(SHORT_MAN, unisex).upper()
 
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Scissors, Volume2, CheckCircle, Square, AlertTriangle, ShieldCheck, Beaker, Languages, RefreshCw, Camera, Play } from 'lucide-react';
-import { getInstructions, getInstructionAudio, getSelectionComparison, confirmHaircut } from '../../api/client';
+import { getInstructions, getInstructionAudio, getSelectionComparison, generateSelectionViews, confirmHaircut } from '../../api/client';
 import type { InstructionLanguage, PhotoView, SelectionComparison } from '../../api/client';
 import { getSession, isStaff } from '../../auth/session';
 import { StaffApproval } from '../../components/StaffApproval';
@@ -31,6 +31,7 @@ export const CuttingInstructionsPage: React.FC = () => {
   const [stepsLoading, setStepsLoading] = useState(false);
   const [comparison, setComparison] = useState<SelectionComparison | null>(null);
   const [viewsTimedOut, setViewsTimedOut] = useState(false);
+  const [generatingViews, setGeneratingViews] = useState(false);
   const [haircutConfirmed, setHaircutConfirmed] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
@@ -38,6 +39,7 @@ export const CuttingInstructionsPage: React.FC = () => {
   const needsStylist = !isStaff(getSession());
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const triggeredRef = useRef(false);
 
   const rawSelectedStyle = localStorage.getItem('salon_selected_style');
   const selectedStyle = rawSelectedStyle ? JSON.parse(rawSelectedStyle) : null;
@@ -86,6 +88,20 @@ export const CuttingInstructionsPage: React.FC = () => {
     return () => { cancelled = true; };
   }, [language, styleId, selectionId]);
 
+  const handleGenerateViews = async () => {
+    if (!selectionId || generatingViews) return;
+    setGeneratingViews(true);
+    setViewsTimedOut(false);
+    try {
+      const res = await generateSelectionViews(selectionId);
+      setComparison(res);
+    } catch (e) {
+      console.error('View generation failed:', e);
+    } finally {
+      setGeneratingViews(false);
+    }
+  };
+
   // AI previews for side and back are generated in the background after confirmation: poll until ready
   useEffect(() => {
     if (!selectionId) return;
@@ -101,10 +117,16 @@ export const CuttingInstructionsPage: React.FC = () => {
         const wanted: PhotoView[] = c.style.service === 'Beard' ? ['side'] : ['side', 'back'];
         const pending = wanted.filter((v) => c.before[v] && !c.ai[v]);
         if (!pending.length) return;
+
+        // If side/back photos exist but AI views are missing and no generation triggered yet, start generation
+        if (!triggeredRef.current && pending.length > 0) {
+          triggeredRef.current = true;
+          handleGenerateViews();
+        }
       } catch { /* keep trying */ }
       tries += 1;
       if (tries >= 40) { setViewsTimedOut(true); return; } // ~5 minutes
-      timer = setTimeout(poll, 8000);
+      timer = setTimeout(poll, 6000);
     };
     poll();
     return () => { cancelled = true; clearTimeout(timer); };
@@ -285,6 +307,19 @@ export const CuttingInstructionsPage: React.FC = () => {
             );
           })}
         </div>
+        {((comparison && (comparison.before.side || comparison.before.back) && (!comparison.ai.side || !comparison.ai.back)) || viewsTimedOut) && (
+          <div className="flex justify-end pt-1">
+            <button
+              type="button"
+              onClick={handleGenerateViews}
+              disabled={generatingViews}
+              className="min-h-[40px] px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold flex items-center gap-2 shadow-sm transition-all"
+            >
+              <RefreshCw className={`w-4 h-4 ${generatingViews ? 'animate-spin' : ''}`} />
+              {generatingViews ? 'Generating Side & Back Previews...' : 'Generate Side & Back Previews'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Step-by-Step Instructions List & Consultation Sign-off */}

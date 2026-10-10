@@ -4,7 +4,7 @@ import { CameraCapture } from './CameraCapture';
 import type { PhotoView } from '../api/client';
 
 const VIEW_INFO: Record<PhotoView, { label: string; hint: string; facing: 'user' | 'environment' }> = {
-  front: { label: 'Front', hint: 'Face the camera, hair untied, good light', facing: 'user' },
+  front: { label: 'Front', hint: 'Face camera, hair free / loose & let down (not tied back), good light', facing: 'user' },
   side: { label: 'Side', hint: 'Turn sideways so one ear and the side of the hair show', facing: 'environment' },
   back: { label: 'Back', hint: 'Turn around; someone else takes the back of the head', facing: 'environment' },
 };

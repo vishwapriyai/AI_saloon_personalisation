@@ -33,9 +33,12 @@ def test_tied_back_hair_is_let_down_and_keeps_length_only_for_long_cuts():
     assert "untied and let down" in bob and "full natural length" not in bob
 
 
-def test_colour_and_texture_looks_are_not_untied():
+def test_colour_and_texture_looks_remove_accessories_but_keep_the_cut():
+    # request: accessories are removed on every uploaded photo; colour/texture looks still keep the cut
     for sid in (201, 304):
-        assert "untied" not in prompt_engine.build_prompt(VERY_LONG_TIED, get_style(sid))
+        prompt = prompt_engine.build_prompt(VERY_LONG_TIED, get_style(sid))
+        assert "Remove every hair accessory" in prompt and "untied and let down in the new cut" not in prompt
+        assert "Keep the exact haircut, length" in prompt
 
 
 # ---------------------------------------------------------------- very long hair vs the catalogue's "Long"

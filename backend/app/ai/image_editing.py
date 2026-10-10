@@ -30,7 +30,7 @@ from app.ai.prompt_engine import PROMPT_TEMPLATE_VERSION, prompt_engine
 from app.ai.vision_models import (
     LM_CHEEK_SKIN, LM_FOREHEAD_CENTER, LM_NOSE_TIP, FaceGeometry, delta_e, get_vision_models, hair_lab, portrait_box,
 )
-from app.ai.vision_models import hair_length as measure_hair_length
+from app.ai.vision_models import hair_length as measure_hair_length, hair_texture
 from app.core.config import TEST_ONLY_PROVIDERS, settings
 from app.core.privacy import photo_cache_tag
 from app.core.security import media_path
@@ -207,13 +207,10 @@ def _added_forehead_mark(src: "SourcePhoto", edited_rgb: np.ndarray, face: FaceG
 
 
 def _border_difference(a: np.ndarray, b: np.ndarray, hair: np.ndarray) -> float:
-    """Mean absolute RGB difference on the left/right edges (lower 60%) and bottom edge, i.e. background
-    and clothing, ignoring pixels that are hair in either image (a new long cut may legitimately cover them)."""
+    """Mean absolute RGB difference on bottom clothing area, ignoring background replaced by white studio backdrop."""
     h, w = a.shape[:2]
-    ew, eh = max(4, int(w * 0.08)), max(4, int(h * 0.08))
+    eh = max(4, int(h * 0.08))
     region = np.zeros((h, w), dtype=bool)
-    region[int(h * 0.4):, :ew] = True
-    region[int(h * 0.4):, w - ew:] = True
     region[h - eh:, :] = True
     keep = region & ~hair
     if keep.sum() < 0.05 * region.sum():
@@ -245,6 +242,81 @@ def _register(src_rgb: np.ndarray, edited_rgb: np.ndarray, src_ignore: np.ndarra
     return M
 
 
+PERSON_MIN_FRACTION, PERSON_MAX_FRACTION = 0.05, 0.97  # outside this the person was not separated
+FACE_KEPT_MIN = 0.97        # share of the face that must survive the background replacement
+NEAR_WHITE = 235            # a model background this bright (all channels) already counts as white
+MIN_KEPT_COMPONENT = 0.03   # person fragments smaller than this share of the main body are background noise
+MAX_FILLED_HOLE = 0.01      # holes inside the person up to this share of the image are filled (not whitened)
+
+
+def _clean_person_mask(mask: np.ndarray) -> np.ndarray:
+    """Removes stray fragments (specks of background labelled as person) and fills small holes."""
+    m = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(m, 8)
+    if n <= 1:
+        return m.astype(bool)
+    areas = stats[1:, cv2.CC_STAT_AREA]
+    keep = np.zeros_like(m, dtype=bool)
+    for i, area in enumerate(areas, start=1):
+        if area >= MIN_KEPT_COMPONENT * areas.max():
+            keep |= labels == i
+    # Fill enclosed holes that are small; a large enclosed gap (e.g. between arm and body) stays background
+    inv = (~keep).astype(np.uint8)
+    hn, hlabels, hstats, _ = cv2.connectedComponentsWithStats(inv, 4)
+    h, w = keep.shape
+    for i in range(1, hn):
+        x, y, bw, bh, area = hstats[i]
+        touches_border = x == 0 or y == 0 or x + bw >= w or y + bh >= h
+        if not touches_border and area <= MAX_FILLED_HOLE * h * w:
+            keep |= hlabels == i
+    return keep
+
+
+def _near_white_background(rgb: np.ndarray) -> bool:
+    """The model already returned a white background (checked on a band along the image border)."""
+    h, w = rgb.shape[:2]
+    b = max(4, int(min(h, w) * 0.03))
+    band = np.concatenate([rgb[:b].reshape(-1, 3), rgb[:, :b].reshape(-1, 3), rgb[:, -b:].reshape(-1, 3)])
+    return float((band.min(axis=1) >= NEAR_WHITE).mean()) >= 0.9
+
+
+def whiten_background(img: Image.Image, face: Optional[FaceGeometry] = None) -> tuple[Image.Image, Optional[str]]:
+    """
+    Puts the person on a solid white (#FFFFFF) background. The person (hair, face and body skin, clothes and
+    accessories such as jewellery) comes from MediaPipe's multi-class segmenter, which also works on side and
+    back photos without a face. Returns (image, problem); on a problem the original image is returned and the
+    caller decides (a white model background is accepted, otherwise the attempt is retried).
+    """
+    rgb = np.asarray(img.convert("RGB"))
+    mask = get_vision_models().person_mask(rgb)
+    if mask is None:
+        return img, "background segmentation model missing (run ai_models/download_models.py)"
+    mask = _clean_person_mask(mask)
+    fraction = float(mask.mean())
+    if not PERSON_MIN_FRACTION <= fraction <= PERSON_MAX_FRACTION:
+        return img, f"person could not be separated from the background ({fraction:.0%} of the image)"
+    if face is not None:
+        hull = np.zeros(mask.shape, np.uint8)
+        cv2.fillConvexPoly(hull, cv2.convexHull(face.points.astype(np.int32)), 1)
+        hull = hull.astype(bool)
+        if hull.any() and float(mask[hull].mean()) < FACE_KEPT_MIN:
+            return img, "the background replacement would cut into the face"
+    soft = cv2.GaussianBlur(mask.astype(np.float32), (5, 5), 0)
+    soft[soft < 0.02] = 0.0          # pure #FFFFFF everywhere outside the person
+    soft = soft[..., None]
+    out = (rgb.astype(np.float32) * soft + 255.0 * (1.0 - soft)).round().clip(0, 255).astype(np.uint8)
+    return Image.fromarray(out), None
+
+
+def apply_pure_white_background(img: Image.Image) -> Image.Image:
+    """Compatibility wrapper: the white-background image, or the input unchanged when that is not possible."""
+    return whiten_background(img)[0]
+
+
+def vm_face_of(img: Image.Image) -> Optional[FaceGeometry]:
+    return get_vision_models().detect_face(np.asarray(img.convert("RGB")))
+
+
 def add_preview_label(img: Image.Image) -> Image.Image:
     out = img.copy()
     draw = ImageDraw.Draw(out)
@@ -258,7 +330,7 @@ def add_preview_label(img: Image.Image) -> Image.Image:
 # Validation
 # ----------------------------------------------------------------------------
 # Bump when the validation rules change, so cached previews accepted under older rules are not reused
-VALIDATION_VERSION = "validate-v3"
+VALIDATION_VERSION = "validate-v7-six-points"
 
 
 @dataclass
@@ -322,7 +394,49 @@ def _style_not_applied(src: SourcePhoto, edited_rgb: np.ndarray, face: FaceGeome
     return None
 
 
-def validate_edit(src: SourcePhoto, edited_rgb: np.ndarray, style: Dict[str, Any]) -> Validation:
+# Hair volume (hair area) the edit may reach, relative to the original, by how the length changes. Letting tied-back
+# hair down legitimately shows much more hair, so that case is not limited.
+MAX_HAIR_AREA_RATIO = {"shorter": 1.25, "same": 1.40}
+MAX_HAIR_AREA_RATIO_KEEP_CUT = 1.30   # colour looks keep the cut
+
+
+def _length_change_of(analysis: Optional[Dict[str, Any]], style: Dict[str, Any]) -> Optional[str]:
+    from app.ai.prompt_engine import _length_change
+    return _length_change(analysis or {}, style)
+
+
+def _volume_problem(before_px: float, after_px: float, analysis: Optional[Dict[str, Any]],
+                    style: Dict[str, Any]) -> Optional[str]:
+    """Extra volume / density added to the hair, judged from the hair area before and after."""
+    if before_px <= 0 or (analysis or {}).get("hair_tied_back"):
+        return None
+    service = style.get("service", "Hair")
+    if service == "Hair":
+        limit = MAX_HAIR_AREA_RATIO.get(_length_change_of(analysis, style))
+    elif service == "Colour":
+        limit = MAX_HAIR_AREA_RATIO_KEEP_CUT
+    else:
+        limit = None  # texture services (perms, waves) change volume by design; beard looks do not touch it
+    ratio = after_px / before_px
+    if limit is not None and ratio > limit:
+        return f"extra hair volume added ({ratio:.2f}x the original hair area)"
+    return None
+
+
+def _texture_flip(before_rgb: np.ndarray, before_mask: np.ndarray, after_rgb: np.ndarray, after_mask: np.ndarray,
+                  width: float, style: Dict[str, Any]) -> Optional[str]:
+    """Straight hair turned curly (or the reverse) by a service that must keep the texture."""
+    if style.get("service", "Hair") == "Texture":
+        return None
+    before, _ = hair_texture(before_rgb, before_mask, width)
+    after, _ = hair_texture(after_rgb, after_mask, width)
+    if {before, after} == {"Straight", "Curly"}:
+        return f"hair texture changed ({before.lower()} to {after.lower()})"
+    return None
+
+
+def validate_edit(src: SourcePhoto, edited_rgb: np.ndarray, style: Dict[str, Any],
+                  analysis: Optional[Dict[str, Any]] = None) -> Validation:
     vm = get_vision_models()
     profile = validation_profile(style)
     changed = np.abs(src.rgb.astype(np.int16) - edited_rgb.astype(np.int16)).max(axis=2) > 20
@@ -385,6 +499,11 @@ def validate_edit(src: SourcePhoto, edited_rgb: np.ndarray, style: Dict[str, Any
     missed = _style_not_applied(src, edited_rgb, face, mask, style, profile, hair_de)
     if missed:
         return Validation(missed, identity, hair_score)
+    if profile.service != "Beard":
+        problem = (_volume_problem(float(src_hair.sum()), float(mask.sum()), analysis, style)
+                   or _texture_flip(src.rgb, src.hair_mask, edited_rgb, mask, src.face.width, style))
+        if problem:
+            return Validation(problem, identity, hair_score)
     return Validation(None, identity, hair_score)
 
 
@@ -398,13 +517,13 @@ class GeminiEditor:
 
     def __init__(self):
         from google import genai  # imported lazily so the app starts without the key
-        key = settings.get_gemini_api_key()
-        if not key:
+        keys = settings.get_gemini_api_keys()
+        if not keys:
             raise ImageEditError("No GEMINI_API_KEY found in backend/.env")
-        self._key = key
-        self._client = genai.Client(api_key=key)
-        masked = key[:6] + "..." + key[-4:] if len(key) > 10 else "***"
-        log_progress("GEMINI-INIT", f"Initialized Gemini Editor with single API Key ({masked})", "INFO")
+        self._keys = keys
+        self._clients = [genai.Client(api_key=k) for k in keys]
+        self._key_counter = 0
+        log_progress("GEMINI-INIT", f"Initialized Gemini Editor with Pool of {len(keys)} API Key(s)", "INFO")
 
     max_prompt_chars = None
 
@@ -414,6 +533,11 @@ class GeminiEditor:
     def supports_reference(self, tier: str) -> bool:
         return True
 
+    def _next_client(self) -> tuple[Any, str]:
+        idx = self._key_counter % len(self._clients)
+        self._key_counter += 1
+        return self._clients[idx], self._keys[idx]
+
     async def edit_image(self, tier: str, prompt: str, photo: bytes, reference: Optional[bytes],
                          usage: Optional[Dict[str, Any]] = None, back_image: Optional[bytes] = None,
                          extra_images: Optional[list[bytes]] = None) -> bytes:
@@ -421,7 +545,6 @@ class GeminiEditor:
         from google.genai.errors import APIError
 
         model_name = self.model_for(tier)
-        masked_key = self._key[:6] + "..." + self._key[-4:] if len(self._key) > 10 else "***"
 
         contents: list[Any] = [types.Part.from_bytes(data=photo, mime_type="image/jpeg")]
         if extra_images:
@@ -434,55 +557,54 @@ class GeminiEditor:
             contents.append(types.Part.from_bytes(data=reference, mime_type="image/jpeg"))
         contents.append(prompt)
 
-        log_progress("GEMINI-REQUEST", f"Sending request using Single Key ({masked_key}) to '{model_name}'...")
+        # Try clients from the pool; if one key hits a rate limit (429 / RESOURCE_EXHAUSTED), failover to next key
+        last_error = None
+        for key_try in range(len(self._clients)):
+            client, key = self._next_client()
+            masked_key = key[:6] + "..." + key[-4:] if len(key) > 10 else "***"
+            log_progress("GEMINI-REQUEST", f"Sending request using API Key #{key_try + 1}/{len(self._clients)} ({masked_key}) to '{model_name}'...")
 
-        try:
-            resp = await self._client.aio.models.generate_content(
-                model=model_name,
-                contents=contents,
-                config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
-            )
-            for cand in resp.candidates or []:
-                for part in (cand.content.parts if cand.content else []) or []:
-                    if part.inline_data and part.inline_data.data:
-                        log_progress("GEMINI-SUCCESS", f"Successfully generated image using Single Key ({masked_key})!", "SUCCESS")
-                        if usage is not None and resp.usage_metadata:
-                            um = resp.usage_metadata
-                            usage["input_tokens"] = um.prompt_token_count or 0
-                            usage["output_tokens"] = um.candidates_token_count or 0
-                            usage["total_tokens"] = um.total_token_count or (usage["input_tokens"] + usage["output_tokens"])
-                            price = _token_price(model_name)
-                            if price:
-                                usage["cost_usd"] = (usage["input_tokens"] * price[0] + usage["output_tokens"] * price[1]) / 1e6
-                        return part.inline_data.data
-            reason = resp.candidates[0].finish_reason if resp.candidates else getattr(resp, "prompt_feedback", None)
-            raise ImageEditError(f"Gemini returned no image (reason: {reason})")
+            try:
+                resp = await client.aio.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
+                )
+                for cand in resp.candidates or []:
+                    for part in (cand.content.parts if cand.content else []) or []:
+                        if part.inline_data and part.inline_data.data:
+                            log_progress("GEMINI-SUCCESS", f"Successfully generated image using Key ({masked_key})!", "SUCCESS")
+                            if usage is not None and resp.usage_metadata:
+                                um = resp.usage_metadata
+                                usage["input_tokens"] = um.prompt_token_count or 0
+                                usage["output_tokens"] = um.candidates_token_count or 0
+                                usage["total_tokens"] = um.total_token_count or (usage["input_tokens"] + usage["output_tokens"])
+                                price = _token_price(model_name)
+                                if price:
+                                    usage["cost_usd"] = (usage["input_tokens"] * price[0] + usage["output_tokens"] * price[1]) / 1e6
+                            return part.inline_data.data
+                reason = resp.candidates[0].finish_reason if resp.candidates else getattr(resp, "prompt_feedback", None)
+                last_error = f"Gemini returned no image (reason: {reason})"
 
-        except APIError as e:
-            is_rate_limit = (e.code == 429 or "RESOURCE_EXHAUSTED" in str(e).upper() or "QUOTA" in str(e).upper())
-            if is_rate_limit:
-                log_api_exceeded_warning(
-                    provider=f"Gemini (Key: {masked_key})",
-                    model=model_name,
-                    error_msg=f"HTTP 429 Rate Limit / Quota Exceeded ({e.message})",
-                    hint="Gemini API Key quota limit reached. Please check quota or wait for reset."
-                )
-                raise ImageEditError("Gemini API Key hit rate limits / quota exceeded.")
-            else:
-                log_api_exceeded_warning(f"Gemini (Key: {masked_key})", model_name, f"HTTP {e.code}: {e.message}")
-                raise ImageEditError(f"Gemini API error {e.code}: {e.message}")
-        except Exception as e:
-            err_str = str(e)
-            is_rate_limit = ("429" in err_str or "RESOURCE_EXHAUSTED" in err_str.upper() or "QUOTA" in err_str.upper())
-            if is_rate_limit:
-                log_api_exceeded_warning(
-                    provider=f"Gemini (Key: {masked_key})",
-                    model=model_name,
-                    error_msg=f"Quota Exceeded: {err_str}",
-                    hint="Gemini API Key rate limit hit."
-                )
-                raise ImageEditError("Gemini API Key hit rate limit.")
-            raise ImageEditError(f"Gemini error: {err_str}")
+            except APIError as e:
+                is_rate_limit = (e.code == 429 or "RESOURCE_EXHAUSTED" in str(e).upper() or "QUOTA" in str(e).upper())
+                if is_rate_limit and key_try < len(self._clients) - 1:
+                    log_progress("GEMINI-KEY-ROTATE", f"Key {masked_key} hit rate limit ({e.message}). Rotating to next key in pool...", "WARNING")
+                    last_error = f"Gemini API Key hit rate limits / quota exceeded ({e.message})"
+                    continue
+                else:
+                    log_api_exceeded_warning(f"Gemini (Key: {masked_key})", model_name, f"HTTP {e.code}: {e.message}")
+                    raise ImageEditError(f"Gemini API error {e.code}: {e.message}")
+            except Exception as e:
+                err_str = str(e)
+                is_rate_limit = ("429" in err_str or "RESOURCE_EXHAUSTED" in err_str.upper() or "QUOTA" in err_str.upper())
+                if is_rate_limit and key_try < len(self._clients) - 1:
+                    log_progress("GEMINI-KEY-ROTATE", f"Key {masked_key} hit rate limit ({err_str}). Rotating to next key in pool...", "WARNING")
+                    last_error = f"Gemini API Key hit rate limit ({err_str})"
+                    continue
+                raise ImageEditError(f"Gemini error: {err_str}")
+
+        raise ImageEditError(last_error or "Gemini generation failed across key pool")
 
 
 class CloudflareEditor:
@@ -714,6 +836,74 @@ class HuggingFaceSpaceEditor:
 # ----------------------------------------------------------------------------
 # Orchestrator
 # ----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------- side / back view checks
+FRONTAL_YAW_MAX = 0.12        # nose offset / face width below this = facing the camera
+VIEW_LENGTH_TOLERANCE = 0.25  # hair extent may differ this much when the length is kept
+VIEW_SHORTER_MAX = 1.10       # a shorter cut may not end lower than the original hair
+VIEW_TIED_MAX = 1.35          # tied-back hair let down: the ponytail already shows most of its length
+
+
+def _frontal_face(rgb: np.ndarray) -> Optional[FaceGeometry]:
+    """A face looking roughly at the camera (profiles and backs of heads return None)."""
+    face = get_vision_models().detect_face(rgb)
+    if face is None:
+        return None
+    yaw = abs(float(face.pt(LM_NOSE_TIP)[0]) - face.center_x) / max(face.width, 1.0)
+    return face if yaw < FRONTAL_YAW_MAX else None
+
+
+def _view_angle_problem(rgb: np.ndarray, view: str) -> Optional[str]:
+    """Back views show no face; side views show a profile, not a face looking at the camera."""
+    if view == "back":
+        return "shows the face" if get_vision_models().detect_face(rgb) is not None else None
+    if view == "side":
+        return "shows the face from the front" if _frontal_face(rgb) is not None else None
+    return None
+
+
+def _hair_extent(mask: np.ndarray) -> float:
+    """Vertical extent of the main hair region in pixels (top of the head to the lowest hair)."""
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), 8)
+    if n <= 1:
+        return 0.0
+    main = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    rows = np.nonzero((labels == main).any(axis=1))[0]
+    return float(rows.max() - rows.min() + 1) if rows.size else 0.0
+
+
+def _view_result_problem(src_rgb: np.ndarray, src_hair: np.ndarray, edited: np.ndarray, view: str,
+                         style: Dict[str, Any], analysis: Dict[str, Any]) -> Optional[str]:
+    """
+    Checks a side/back result against the customer's own photo of that view (same framing): the angle, the
+    finished length (a shorter cut may not end lower; a kept length stays within tolerance), added volume and
+    a straight/curly texture flip. The front preview is matched by the prompt; these checks catch clear misses.
+    """
+    angle = _view_angle_problem(edited, view)
+    if angle:
+        return f"the generated {view} view {angle}"
+    vm = get_vision_models()
+    after_hair = vm.hair_mask(edited, None)
+    before, after = _hair_extent(src_hair), _hair_extent(after_hair)
+    service = style.get("service", "Hair")
+    tied = bool(analysis.get("hair_tied_back"))
+    if before > 0 and service != "Beard":
+        ratio = after / before
+        change = _length_change_of(analysis, style) if service == "Hair" else "same"
+        if change == "shorter" and ratio > (VIEW_TIED_MAX if tied else VIEW_SHORTER_MAX):
+            return f"hair is longer than in the original photo ({ratio:.2f}x) for a shorter cut"
+        if change == "same":
+            upper = VIEW_TIED_MAX if tied else 1 + VIEW_LENGTH_TOLERANCE
+            if not (1 - VIEW_LENGTH_TOLERANCE) <= ratio <= upper:
+                return f"hair length changed ({ratio:.2f}x the original) although the length is kept"
+    if service != "Beard":
+        width = src_rgb.shape[1] * 0.25  # head width estimate without a face, as in the photo analysis
+        problem = (_volume_problem(float(src_hair.sum()), float(after_hair.sum()), analysis, style)
+                   or _texture_flip(src_rgb, src_hair, edited, after_hair, width, style))
+        if problem:
+            return problem
+    return None
+
+
 class HairStyleGenerator:
     def __init__(self):
         self._editors: Dict[str, Any] = {}
@@ -838,6 +1028,11 @@ class HairStyleGenerator:
     def _sends_back(editor: Any, back_jpeg: Optional[bytes]) -> bool:
         return back_jpeg is not None and getattr(editor, "supports_back_image", False)
 
+    @staticmethod
+    def _extras_sent(editor: Any, extra_jpegs: Optional[list]) -> int:
+        """How many extra customer photos this provider actually receives (0 for one-photo providers)."""
+        return len(extra_jpegs) if extra_jpegs and getattr(editor, "supports_extra_images", False) else 0
+
     async def _edit(self, editor: Any, tier: str, prompt: str, photo: bytes, reference: Optional[bytes],
                     usage: Dict[str, Any], back_jpeg: Optional[bytes] = None,
                     extra_jpegs: Optional[list[bytes]] = None) -> bytes:
@@ -915,7 +1110,8 @@ class HairStyleGenerator:
                     log_progress("FALLBACK-FAILED", f"Fallback provider '{fallback}' unavailable: {fe.reason}", "WARNING")
             prompt = prompt_engine.build_prompt(
                 customer_analysis, style_metadata, strict=attempt > 0, with_reference_image=reference_jpeg is not None,
-                with_back_image=self._sends_back(editor, back_jpeg), num_extra_images=len(extra_jpegs), max_chars=editor.max_prompt_chars)
+                with_back_image=self._sends_back(editor, back_jpeg) and not self._extras_sent(editor, extra_jpegs),
+                num_extra_images=self._extras_sent(editor, extra_jpegs), max_chars=editor.max_prompt_chars)
             
             log_progress("STEP 3/4", f"Attempt {attempt + 1}/{settings.GENERATION_MAX_ATTEMPTS} | Prompt ({len(prompt)} chars): '{prompt[:80]}...'", "INFO")
 
@@ -959,7 +1155,8 @@ class HairStyleGenerator:
                         prompt = prompt_engine.build_prompt(
                             customer_analysis, style_metadata, strict=attempt > 0,
                             with_reference_image=reference_jpeg is not None,
-                            with_back_image=self._sends_back(editor, back_jpeg), num_extra_images=len(extra_jpegs), max_chars=editor.max_prompt_chars)
+                            with_back_image=self._sends_back(editor, back_jpeg) and not self._extras_sent(editor, extra_jpegs),
+                num_extra_images=self._extras_sent(editor, extra_jpegs), max_chars=editor.max_prompt_chars)
                         async with self._sem:
                             raw = await asyncio.wait_for(
                                 self._edit(editor, tier, prompt, src.jpeg, reference_jpeg, usage, back_jpeg, extra_jpegs=extra_jpegs),
@@ -978,13 +1175,24 @@ class HairStyleGenerator:
             self._report_usage(customer_image_url, style_id, attempts, model, usage)
 
             edited = _fit_to(Image.open(io.BytesIO(raw)).convert("RGB"), (src.rgb.shape[1], src.rgb.shape[0]))
-            last = await asyncio.to_thread(validate_edit, src, np.asarray(edited), style_metadata)
+            last = await asyncio.to_thread(validate_edit, src, np.asarray(edited), style_metadata, customer_analysis)
             if last.problem:
                 rejected = True
                 log_progress("VALIDATION-REJECT", f"Style #{style_id} attempt {attempts} rejected: {last.problem}", "WARNING")
                 continue
 
-            result_jpeg = _to_jpeg(add_preview_label(edited))
+            # Solid white background. Validation above ran on the model output; the face must survive the cut-out,
+            # and if the cut-out fails a background the model already made white is accepted, otherwise retry.
+            final, bg_problem = await asyncio.to_thread(whiten_background, edited, vm_face_of(edited))
+            if bg_problem:
+                if _near_white_background(np.asarray(edited)):
+                    final = edited
+                else:
+                    last = Validation(f"background not replaced: {bg_problem}", last.identity_score, last.hair_consistency_score)
+                    rejected = True
+                    log_progress("VALIDATION-REJECT", f"Style #{style_id} attempt {attempts}: {last.problem}", "WARNING")
+                    continue
+            result_jpeg = _to_jpeg(add_preview_label(final))
             with open(cache_img, "wb") as f:
                 f.write(result_jpeg)
             with open(cache_meta, "w", encoding="utf-8") as f:
@@ -1043,6 +1251,12 @@ class HairStyleGenerator:
         editor = self._get_editor(provider)
         model = editor.model_for(tier)
         vm = get_vision_models()
+        # The view comes from the customer's own photo, so the photo must already be taken from that angle;
+        # the model is never asked to invent the back of a head it has not seen.
+        wrong_angle = await asyncio.to_thread(_view_angle_problem, rgb, view)
+        if wrong_angle:
+            raise ImageEditError(f"The {view} photo {wrong_angle}. Please retake it "
+                                 f"{'from behind' if view == 'back' else 'in profile (side on)'}.")
         src_hair = await asyncio.to_thread(vm.hair_mask, rgb, None)
         src_lab = hair_lab(rgb, src_hair)
         colour_change_allowed = style_metadata.get("service") == "Colour"
@@ -1053,11 +1267,12 @@ class HairStyleGenerator:
             attempts = attempt + 1
             prompt = prompt_engine.build_view_prompt(
                 customer_analysis, style_metadata, view, strict=attempt > 0,
-                num_extra_images=len(extra_jpegs),
+                num_extra_images=self._extras_sent(editor, extra_jpegs),
                 with_reference_image=reference_jpeg is not None,
                 max_chars=editor.max_prompt_chars
             )
             usage: Dict[str, Any] = {}
+            fallback = settings.IMAGE_EDIT_FALLBACK_PROVIDER.strip().lower()
             try:
                 async with self._sem:
                     raw = await asyncio.wait_for(
@@ -1068,7 +1283,29 @@ class HairStyleGenerator:
                 last_problem = "the image service took too long to respond"
                 continue
             except ImageEditError as e:
-                raise ImageEditError(e.reason, attempts=attempts, model=model)
+                fallback_handled = False
+                if fallback and editor.name != fallback:
+                    log_progress("VIEW-FALLBACK-ATTEMPT", f"Trying fallback provider '{fallback}' for {view} view of Style #{style_id}", "WARNING")
+                    try:
+                        editor = self._get_editor(fallback)
+                        model = editor.model_for(tier)
+                        reference_jpeg = reference_jpeg if editor.supports_reference(tier) else None
+                        prompt = prompt_engine.build_view_prompt(
+                            customer_analysis, style_metadata, view, strict=attempt > 0,
+                            num_extra_images=self._extras_sent(editor, extra_jpegs),
+                            with_reference_image=reference_jpeg is not None,
+                            max_chars=editor.max_prompt_chars
+                        )
+                        async with self._sem:
+                            raw = await asyncio.wait_for(
+                                self._edit(editor, tier, prompt, jpeg, reference_jpeg, usage, None, extra_jpegs=extra_jpegs),
+                                timeout=settings.GENERATION_TIMEOUT_SECONDS
+                            )
+                            fallback_handled = True
+                    except Exception as fe:
+                        log_progress("VIEW-FALLBACK-FAILED", f"Fallback provider '{fallback}' failed: {fe}", "WARNING")
+                if not fallback_handled:
+                    raise ImageEditError(e.reason, attempts=attempts, model=model)
             self._report_usage(photo_url, f"{style_id}-{view}", attempts, model, usage)
             edited = np.asarray(_fit_to(Image.open(io.BytesIO(raw)).convert("RGB"), img.size))
             changed = np.abs(rgb.astype(np.int16) - edited.astype(np.int16)).max(axis=2) > 20
@@ -1084,7 +1321,20 @@ class HairStyleGenerator:
                     if de > settings.HAIR_COLOUR_MAX_DELTA_E:
                         last_problem = f"hair colour changed (deltaE {de:.1f})"
                         continue
-            url = self._save(_to_jpeg(add_preview_label(Image.fromarray(edited))), f"{style_id}_{view}")
+            view_problem = await asyncio.to_thread(
+                _view_result_problem, rgb, src_hair, edited, view, style_metadata, customer_analysis)
+            if view_problem:
+                last_problem = view_problem
+                log_progress("VIEW-REJECT", f"Style #{style_id} {view} attempt {attempts}: {view_problem}", "WARNING")
+                continue
+            final_img, bg_problem = await asyncio.to_thread(whiten_background, Image.fromarray(edited))
+            if bg_problem:
+                if _near_white_background(edited):
+                    final_img = Image.fromarray(edited)
+                else:
+                    last_problem = f"background not replaced: {bg_problem}"
+                    continue
+            url = self._save(_to_jpeg(add_preview_label(final_img)), f"{style_id}_{view}")
             log_progress("VIEW-SUCCESS", f"Style #{style_id} {view} view generated -> {url}", "SUCCESS")
             return EditResult(url, model, prompt, None, hair_score, attempts, round(time.monotonic() - started, 2))
         raise ImageEditError(last_problem, attempts=attempts, model=model)

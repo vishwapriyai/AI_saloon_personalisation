@@ -66,7 +66,22 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
 
     def get_gemini_api_key(self) -> str:
-        return os.getenv("GEMINI_API_KEY", self.GEMINI_API_KEY).strip()
+        keys = self.get_gemini_api_keys()
+        return keys[0] if keys else ""
+
+    def get_gemini_api_keys(self) -> list[str]:
+        keys = []
+        main_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if main_key:
+            keys.append(main_key)
+        for key, val in sorted(os.environ.items()):
+            if key.startswith("GEMINI_API_KEY_") and val and val.strip():
+                v = val.strip()
+                if v not in keys:
+                    keys.append(v)
+        if not keys and self.GEMINI_API_KEY:
+            keys.append(self.GEMINI_API_KEY.strip())
+        return keys
 
     GEMINI_FAST_MODEL: str = "gemini-2.5-flash-image"        # 8 previews
     GEMINI_HQ_MODEL: str = "gemini-3-pro-image-preview"      # final reference of the chosen style
@@ -95,8 +110,8 @@ class Settings(BaseSettings):
     # Free shared GPUs can take 1-2 minutes per image when busy, so allow slow answers before retrying.
     # Keep PROVIDER_REQUEST_TIMEOUT_SECONDS x PROVIDER_REQUEST_RETRIES below GENERATION_TIMEOUT_SECONDS (checked
     # at startup), and the reverse proxy's read timeout above GENERATION_TIMEOUT_SECONDS x GENERATION_MAX_ATTEMPTS.
-    GENERATION_TIMEOUT_SECONDS: int = 240          # one edit attempt, including provider retries (semaphore wait excluded)
-    PROVIDER_REQUEST_TIMEOUT_SECONDS: int = 110    # one HTTP request to the image provider
+    GENERATION_TIMEOUT_SECONDS: int = 120          # one edit attempt, including provider retries (semaphore wait excluded)
+    PROVIDER_REQUEST_TIMEOUT_SECONDS: int = 45     # one HTTP request to the image provider
     PROVIDER_REQUEST_RETRIES: int = 2              # tries per attempt when the provider hangs or has a transient error
     # Optional second provider tried when the main one is unavailable (e.g. "huggingface"); empty = none
     IMAGE_EDIT_FALLBACK_PROVIDER: str = ""

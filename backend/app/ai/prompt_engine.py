@@ -2,7 +2,7 @@ from typing import Any, Dict, Optional
 
 from app.ai.recommendation_engine import parse_trim_cm
 
-PROMPT_TEMPLATE_VERSION = "hair-edit-v9"
+PROMPT_TEMPLATE_VERSION = "hair-edit-v31-six-points"
 
 UNKNOWN = "Unknown"
 # Customer lengths (measured) and catalogue finished lengths on one scale; "Any" is deliberately absent
@@ -59,65 +59,72 @@ TEXTURE_PHRASES = {
     "coily": "coily",
 }
 
-BLACK_CLOTHING_DISAMBIGUATION_MANDATE = (
-    "BLACK CLOTHING & SCARF VS HAIR DISAMBIGUATION MANDATE: "
-    "The customer may be wearing black clothing, a black dress, a black scarf, black dupatta, or black shawl draped over their shoulders or back (e.g. over a yellow top or other clothing). "
-    "DO NOT MISTAKE BLACK CLOTHING, FABRIC, DUPATTA, OR SCARF FOR HAIR, AND DO NOT MISTAKE BLACK HAIR FOR CLOTHING. "
-    "Strictly separate natural hair originating from the scalp from any black fabric or clothing worn on the shoulders or back. "
-    "Determine and maintain the true hair length strictly from the natural hair on the head, ignoring any black fabric beneath or behind it. "
-    "Preserve the customer's actual clothing and scarf exactly as clothing without blending black fabric into hair strands or vice-versa."
+# Short, plain rules. Long capitalised "mandates" drown out the haircut description, and edit models follow the
+# description less when most of the prompt is boilerplate. Every rule below is one sentence and is only added
+# when it applies to this service, length and view. The white background is also enforced after generation
+# (apply_pure_white_background), so the prompt only needs to ask for it once.
+WHITE_BACKGROUND = (
+    "Replace the whole background with plain solid white (#FFFFFF): no wall, furniture, floor or shadows. "
+    "Keep the person, hair, clothing and jewellery exactly as they are."
 )
 
-MULTI_VIEW_CONSISTENCY_MANDATE = (
-    "STRICT MULTI-VIEW & HAIR LENGTH CONSISTENCY MANDATE: "
-    "You are provided with customer photos from multiple angles (Front, Side, Back). "
-    "The haircut length, style, volume, hair texture, hair colour, and clothing MUST BE 100% IDENTICAL and consistent across all 3 view generations (Front, Side, Back). "
-    "Ensure the finished hair length in this view matches the front view generation and the true natural hair length across all photos."
-)
+HAIR_ACCESSORIES = ("Remove every hair accessory from the hair: ties, elastic bands, scrunchies, clips, claw clips, "
+                    "hairpins, headbands and ribbons.")
+LET_DOWN = "Show the hair let down and loose in the new cut, not in a ponytail, bun or braid."
 
-NO_HALF_PONYTAIL_MANDATE = (
-    "CRITICAL NO HALF-PONYTAIL OR HAIR TIE MANDATE: "
-    "Show the hair completely let down and hanging free. "
-    "DO NOT gather or tie the hair into a half-up ponytail, half-up tie, ponytail, bun, braid, hair clip, claw clip, or elastic band at the top of the head or crown. "
-    "The hair in the back view MUST hang loose and let down, matching the styling of the front view preview."
-)
+DENSITY_RULE = ("Keep the customer's natural hair density and thickness; do not add volume or extra hair beyond "
+                "their own.")
 
-STRICT_BACK_LENGTH_MATCHING_MANDATE = (
-    "STRICT BACK VIEW LENGTH MATCHING MANDATE: "
-    "The hair length in the back view MUST MATCH the front and side view preview exactly. "
-    "If the front view hair ends near the collarbone or upper chest, the back view hair MUST end at upper-back / shoulder blade level, NOT waist level. "
-    "DO NOT EXTEND THE HAIR DOWN TO THE WAIST OR LOWER BACK. "
-    "DO NOT MISTAKE THE BLACK SCARF, DUPATTA, OR DRESS ON THE SHOULDERS FOR HAIR LENGTH."
-)
+CLOTHING_NOT_HAIR = ("A dark scarf, dupatta or garment on the shoulders is clothing, not hair: judge the hair length only "
+                     "from hair growing from the scalp, and keep the clothing as it is.")
+
+SIDE_VIEW_RULE = ("This is a side (profile) view: keep this photo's camera angle, with the face in profile and one ear "
+                  "visible. Do not turn the person towards the camera.")
+BACK_VIEW_RULE = ("This is a back view: keep the camera behind the head, showing the back of the head, the nape and "
+                  "the shoulders. Show no face.")
+
+
+def _shows_long_cut(analysis: Dict[str, Any], style: Dict[str, Any]) -> bool:
+    """The finished look reaches the shoulders or beyond (lob and longer, or a kept long length)."""
+    target = LENGTH_ORDER.get(str(style.get("hair_length") or ""))
+    if _service(style) == "Hair" and target is not None:
+        return target >= LENGTH_ORDER["Lob"]
+    current = LENGTH_ORDER.get(str(analysis.get("hair_length") or ""))
+    return current is not None and current >= LENGTH_ORDER["Medium"]
+
+
+def _accessory_rule(analysis: Dict[str, Any], style: Dict[str, Any]) -> str:
+    """Accessories are removed for every hair service. "Let down and loose" only when the finished look is long
+    enough to hang loose; a pixie or buzz cut must not be told to show hair over the shoulders."""
+    if _service(style) == "Beard":
+        return ""
+    rule = HAIR_ACCESSORIES
+    if _shows_long_cut(analysis, style):
+        rule += " " + LET_DOWN
+    return rule
+
 
 # Accessories (bindi, earrings, makeup...) are deliberately NOT named: edit models tend to draw whatever the
 # prompt mentions, e.g. adding a bindi to a man. Keeping the whole face unchanged preserves any that exist.
 IDENTITY_BLOCK = (
-    "The person in the input image MUST remain the same person. Everything except the hair must stay exactly "
-    "as in the original photo: facial identity, facial structure, face proportions, eyes, eyebrows, nose, "
-    "lips, jawline, skin tone, skin texture, age appearance, expression, anything already on the face or "
-    "body, clothing, pose, camera angle, background and lighting. Add nothing new to the face or body."
+    "The person must remain the same person. Apart from the hair and the background, everything stays exactly as "
+    "in the photo: face, facial structure, eyes, eyebrows, nose, lips, jawline, skin tone and texture, age, "
+    "expression, anything already on the face or body, clothing, pose, camera angle and lighting. Add nothing new "
+    "to the face or body."
 )
 
 IDENTITY_BLOCK_STRICT = (
-    "The face must stay pixel-identical to the input photo. Only pixels belonging to the hair may change. "
-    "Do not redraw, beautify, smooth, slim, age or de-age the face, do not add anything to it, and do not "
-    "alter skin, clothing, body or background in any way."
+    "The face must stay pixel-identical to the input photo; only the hair and the background may change. Do not "
+    "redraw, beautify, smooth, slim, age or de-age the face, add nothing to it, and keep skin, clothing and body as "
+    "they are."
 )
 
-DO_NOT_BLOCK = (
-    "Do not generate a new person. Do not replace the customer's face. Do not change the skin tone. "
-    "Do not change the facial features. Do not change the clothing. Do not change the background. "
-    "Do not change the camera angle. Do not create a generic model."
-)
+DO_NOT_BLOCK = "Do not generate a new person or a generic model, and do not replace the customer's face."
 
 REALISM_BLOCK = (
-    "The new haircut must look physically realistic and achievable by a professional salon stylist. The new "
-    "hair must naturally connect to the customer's existing scalp and hairline at the forehead, temples, "
-    "ears and back of the head. The final image must look like the same customer after receiving the "
-    "selected hairstyle. Photorealistic. Natural hair strands. Natural hairline. Natural hair volume. "
-    "Natural shadows. Realistic integration between hair and forehead. Return the full photo with the same "
-    "framing and aspect ratio as the input."
+    "The cut must be realistic and achievable by a salon stylist, with the hair connecting naturally to the scalp "
+    "and hairline. Photorealistic, natural strands and shadows. Return the full photo with the same framing and "
+    "aspect ratio."
 )
 
 
@@ -236,9 +243,13 @@ class ControlledPromptEngine:
             required.append("Use image 2 only as a style guide.")
         what = {"Beard": "beard style", "Colour": "salon hair colour", "Texture": "salon hair texture"}.get(service, "salon haircut")
         required.append(f"Change only the {target} to this {what}: {_edit_description(style)}")
+        if not is_beard:
+            required.append("Remove hair ties, clips and bands." + (" Show the hair let down and loose."
+                                                                     if _shows_long_cut(analysis, style) else ""))
         required.append("The face must stay pixel-identical." if strict else
                         f"Everything except the {target} stays as in the photo: same person, face, skin, clothing, "
-                        "pose, background and light.")
+                        "pose and light.")
+        required.append("Plain solid white background.")
 
         if is_beard:
             keep = "Keep the natural beard density and growth area; add no beard where there is none."
@@ -252,6 +263,8 @@ class ControlledPromptEngine:
         optional = [keep]
         if not is_beard and _has_beard(analysis) and not is_female:
             optional.append("Keep the beard and moustache exactly as they are.")
+        if not is_beard:
+            optional.append("Do not add volume or density.")
         optional += ["Add nothing to the face.", "Photorealistic, natural skin texture."]
 
         prompt = " ".join(required)
@@ -289,40 +302,34 @@ class ControlledPromptEngine:
             "generation task.",
         ]
         if is_female:
-            parts.append(
-                "CRITICAL FEMALE CUSTOMER MANDATE: THE CUSTOMER IS A WOMAN / FEMALE. DO NOT GENERATE ANY BEARD, "
-                "STUBBLE, MOUSTACHE, SIDEBURNS, GOATEE, OR MASCULINE FACIAL HAIR ON THE FACE OR JAWLINE OR CHIN. "
-                "THE FACE, CHEEKS, CHIN, LIPS, AND JAWLINE MUST REMAIN 100% FEMININE, SMOOTH, AND CLEAN-SHAVEN "
-                "WITHOUT ANY BEARD OR FACIAL HAIR."
-            )
+            parts.append("The customer is a woman: add no beard, stubble, moustache or other facial hair; the face, "
+                         "cheeks, chin and jawline stay smooth.")
         # Only when the analysis found the hair tied back; loose hair must not be told it is tied (the model
         # would invent length), and a shorter cut must not be told to keep the full length
         untie = _untie_sentence(customer_analysis, style_metadata)
         if untie:
             parts.append(untie)
 
+        # Extra photos (side / back of the same customer) are described only when they are actually sent, and
+        # every image number below is the real position of that image in the request.
         total_extras = max(num_extra_images, 1 if with_back_image else 0)
         if total_extras > 0:
-            extra_idx_end = 1 + total_extras
+            others = "Image 2" if total_extras == 1 else f"Images 2 to {1 + total_extras}"
             parts.append(
-                f"Image 1 is the customer and the primary image to edit. "
-                f"Images 2 through {extra_idx_end} show the same customer from other angles (Side/Back/Front view): "
-                f"use all of them to see the customer's real hair length, hair density, hair texture, and clothing from all angles. "
-                f"They are multi-view references for accuracy and must not appear in the final result."
+                f"Image 1 is the customer photo to edit. {others} show the same customer from other angles, for "
+                "reference only: use them to see the real hair length, density and texture. They must not appear "
+                "in the result."
             )
             if service == "Hair" and _length_change(customer_analysis, style_metadata) == "shorter":
-                parts.append("Cut the hair to the target length.")
+                parts.append("Then cut the hair to the target length.")
 
         if with_reference_image:
             ref_idx = f"Image {2 + total_extras}"
             parts.append(
-                f"Image 1 is the customer and is the ONLY source of identity. {ref_idx} is a hairstyle reference "
-                f"only: apply the hairstyle characteristics shown in {ref_idx} to the customer's actual hair in "
-                f"image 1. Never copy the face, skin, body, clothing or background of the person in {ref_idx}."
+                f"{ref_idx} is a hairstyle reference only: apply its hairstyle to the customer's own hair in image 1. "
+                f"Never copy the face, skin, body, clothing or background of the person in {ref_idx}."
             )
 
-        parts.append(BLACK_CLOTHING_DISAMBIGUATION_MANDATE)
-        parts.append(MULTI_VIEW_CONSISTENCY_MANDATE)
         parts.append(IDENTITY_BLOCK_STRICT if strict else IDENTITY_BLOCK)
 
         if service == "Colour":
@@ -357,13 +364,9 @@ class ControlledPromptEngine:
                 "without adding thick fake beard hair or artificial dark density."
             )
         else:
-            parts.append("ONLY MODIFY THE HAIR.")
+            parts.append("ONLY MODIFY THE HAIR ON THE HEAD.")
             if not is_female:
-                parts.append(
-                    "CRITICAL BEARD & FACIAL HAIR LOCK MANDATE: THE SELECTED SERVICE IS HAIRCUT ONLY. DO NOT MODIFY, "
-                    "TRIM, SHAVE, SHAPE, OR EDIT THE CUSTOMER'S BEARD, MUSTACHE, STUBBLE OR FACIAL HAIR IN ANY WAY. "
-                    "KEEP THE CUSTOMER'S EXACT EXISTING BEARD, MUSTACHE, STUBBLE AND FACIAL HAIR 100% UNCHANGED AND UNTOUCHED."
-                )
+                parts.append("This is a haircut only: keep the beard, moustache and stubble exactly as they are.")
             style_line = f"Target hairstyle (a normal salon haircut): {description}"
             details = [d for d in (
                 f"category {category}" if category else None,
@@ -375,6 +378,12 @@ class ControlledPromptEngine:
             parts.append(style_line)
             parts.append(self._hair_preservation(customer_analysis, style_metadata))
 
+        accessory = _accessory_rule(customer_analysis, style_metadata)
+        if accessory:
+            parts.append(accessory)
+        if not is_beard:
+            parts.append(CLOTHING_NOT_HAIR)
+        parts.append(WHITE_BACKGROUND)
         parts.append(DO_NOT_BLOCK)
         parts.append(REALISM_BLOCK)
         return " ".join(parts)
@@ -401,17 +410,14 @@ class ControlledPromptEngine:
                          f"change described in the target style, keeping natural-looking roots.")
         else:
             lines.append(
-                f"STRICT HAIR COLOUR PRESERVATION: Preserve the customer's exact natural hair colour{f' ({colour.lower()})' if _known(colour) else ''} "
-                "and natural root colour exactly; do not alter the shade, do not add dye or highlights, and do not change the natural tone."
+                f"Keep the exact natural hair colour{f' ({colour.lower()})' if _known(colour) else ''} and root colour: "
+                "no dye, highlights or change of tone."
             )
             lines.append(
-                f"STRICT HAIR TEXTURE PRESERVATION: Preserve the customer's natural {texture + ' ' if texture else ''}hair texture and wave/curl "
-                "pattern exactly as it appears in the photo; do not alter, straighten, smooth or curl the hair strands."
+                f"Keep the natural {texture + ' ' if texture else ''}texture and wave/curl pattern exactly; do not "
+                "straighten, smooth or curl the strands."
             )
-        lines.append(
-            f"STRICT HAIR DENSITY PRESERVATION: Preserve the customer's natural hair density{f' ({density.lower()})' if _known(density) else ''} "
-            "and realistic hair thickness; do not add extra hair volume, do not increase hair density, and do not add artificial hair volume beyond their own natural hair."
-        )
+        lines.append(DENSITY_RULE)
         lines.append("Preserve the customer's natural hairline and natural hair growth direction.")
 
         is_female = _is_female(analysis, style)
@@ -435,7 +441,7 @@ class ControlledPromptEngine:
                          "using the same hair colour and texture.")
         if _has_beard(analysis) and not is_female:
             lines.append("Keep the beard and moustache exactly as they are.")
-        lines.append("NO BRAID DIRECTIVE: Show the hair let down and styled as a clean haircut. Do not braid the hair or put it in a ponytail.")
+        lines.append("Show a clean haircut: do not braid the hair or put it in a ponytail or bun.")
         lines.append("Adapt the hairstyle to the customer's actual hair.")
         return " ".join(lines)
 
@@ -446,83 +452,81 @@ class ControlledPromptEngine:
                           with_reference_image: bool = False,
                           max_chars: Optional[int] = None) -> str:
         """
-        Edit prompt for the customer's side or back photo. It shows the same finished look as the front preview:
-        for a haircut that is the style's TARGET length (not the current one); colour, texture and beard looks
-        keep the current cut. Built to fit max_chars with the style description always included.
+        Edit prompt for the customer's own side or back photo. It shows the same finished look as the front
+        preview: for a haircut the style's TARGET length; colour, texture and beard looks keep the current cut.
+        Image order in the request: 1 = this photo, then num_extra_images other photos, then the front preview.
+        Built to fit max_chars with the style description always included.
         """
         service = _service(style)
         target = "beard and moustache" if service == "Beard" else "hair"
         what = {"Beard": "beard style", "Colour": "salon hair colour", "Texture": "salon hair texture"}.get(service, "salon haircut")
-        angle = "side profile" if view == "side" else ("back of the head" if view == "back" else "front view")
+        angle = "side profile" if view == "side" else "back of the head"
         colour = analysis.get("hair_color_detected")
         texture = _texture_word(analysis.get("hair_type"))
         is_female = _is_female(analysis, style)
         colour_str = f"{colour.lower()} " if _known(colour) else ""
         texture_str = f"{texture} " if texture else ""
         compact = max_chars is not None
+        preview_idx = 2 + num_extra_images
 
         if service == "Hair":
-            target_len = style.get("hair_length")
-            words = TARGET_LENGTH_WORDS.get(str(target_len))
-            look = (f"Show the same finished haircut as the front view: {words} hair" if words
-                    else "Show the same finished haircut as the front view")
-            look += f", same natural {colour_str}colour and {texture_str}texture."
-            if LENGTH_ORDER.get(str(target_len), 0) >= 3:  # lob and longer: tied-back hair is shown let down
-                look += " If the hair is tied back or in a clip, remove all hair clips/ties and show it let down in the new cut."
+            words = TARGET_LENGTH_WORDS.get(str(style.get("hair_length")))
+            look = (f"The finished cut is {words} hair, exactly as long as in the front preview; "
+                    f"do not make it longer or shorter." if words else
+                    "The finished length is exactly as in the front preview.")
+            look += f" Same natural {colour_str}colour and {texture_str}texture as the front."
             keep = "Keep the natural hairline and neckline."
             if _has_beard(analysis) and not is_female:
                 keep += " Keep the beard exactly as it is."
         elif service == "Colour":
-            look = "Keep the exact cut and length; change only the colour, as in the front view."
+            look = "Keep the exact cut and length; change only the colour, as in the front preview."
             keep = f"Keep the {texture_str}texture."
         elif service == "Texture":
-            look = "Keep the exact cut and length; change only the texture, as in the front view."
+            look = "Keep the exact cut and length; change only the texture, as in the front preview."
             keep = f"Keep the natural {colour_str}colour."
         else:
             look = "Do not change the hair on the head."
             keep = "Keep the natural beard density and growth area; add no beard where there is none."
         if is_female:
-            keep += " Keep the face smooth, with no facial hair; remove any hair clip, claw clip or ponytail tie."
+            keep += " Keep the face smooth, with no facial hair."
+        accessory = _accessory_rule(analysis, style)
+        angle_rule = BACK_VIEW_RULE if view == "back" else SIDE_VIEW_RULE
 
-        multi_ref_clause = ""
+        refs = []
         if num_extra_images > 0:
-            multi_ref_clause = (
-                f"Image 1 is the primary {angle} photo of the customer to edit. "
-                f"Images 2 through {1 + num_extra_images} show the same customer from other angles (Front/Back/Side view): "
-                f"use all of them to ensure 100% hair length, haircut style, volume, texture, colour, and clothing consistency across all views."
-            )
-
-        ref_clause = ""
+            others = "Image 2" if num_extra_images == 1 else f"Images 2 to {1 + num_extra_images}"
+            refs.append(f"Image 1 is the {angle} photo to edit; {others} show the same customer from other angles, "
+                        "for reference only.")
         if with_reference_image:
-            ref_idx = 2 + num_extra_images
-            ref_clause = (
-                f"Image {ref_idx} is the AI-generated FRONT view preview of this haircut on the customer. "
-                f"You MUST match the haircut in Image {ref_idx} EXACTLY: match the exact finished hair length, "
-                f"hair volume, curl structure, and styling (loose hair let down, NO half-ponytail)."
-            )
+            refs.append(f"Image {preview_idx} is the finished front preview of this look: match its hair length, "
+                        "colour, texture and volume exactly.")
 
         if compact:
-            single = "Edit only the one person in this photo; no collage, no extra people."
-            identity = ("Only the " + target + " may change." if strict else
-                        "Same person, skin, ears, clothing, pose, background and light.")
-            mandates_str = "Distinguish hair from black dress/clothing. Keep length consistent across views. Loose hair let down: no half-ponytail or hair tie."
+            identity = "Only the " + target + " changes; same person, skin, clothing and pose."
+            density = "No added volume." if service != "Beard" else ""
+            short_accessory = ("" if service == "Beard" else "Remove hair ties, clips and bands." +
+                               (" Hair let down and loose." if _shows_long_cut(analysis, style) else ""))
+            # The background rule sits in the head so the length limit can never cut it off
+            head = (f"Image edit of a {angle} photo, not text-to-image. Plain solid white background. {angle_rule} "
+                    + " ".join(refs) + f" Change only the {target} to this {what}: ")
+            tail = " " + " ".join(x for x in (look, short_accessory, density, keep, identity) if x)
         else:
-            single = ("Edit only the single person in this photograph. Do not create a collage or add people, "
-                      "and do not replace the person with a different model.")
-            identity = ("Only the " + target + " may change; everything else must stay pixel-identical." if strict else
-                        f"Everything except the {target} stays exactly as in the photo: same person, skin, ears, neck, "
-                        "clothing, pose, camera angle, background and lighting.")
-            mandates_str = f"{BLACK_CLOTHING_DISAMBIGUATION_MANDATE} {MULTI_VIEW_CONSISTENCY_MANDATE} {NO_HALF_PONYTAIL_MANDATE} {STRICT_BACK_LENGTH_MATCHING_MANDATE}"
-
-        head = (f"Image edit, not text-to-image. This photo shows the {angle} of a salon customer. {single} "
-                f"{multi_ref_clause} {ref_clause} {mandates_str} "
-                f"Change only the {target} to this {what}, as seen from this angle: ")
-        tail = f" {look} {keep} {identity} Photorealistic, no drawn outline lines."
+            single = "Edit only the one person in this photo; no collage, no extra people, no different model."
+            identity = ("Only the " + target + " may change; everything else stays pixel-identical." if strict else
+                        f"Everything except the {target} and the background stays exactly as in the photo: same "
+                        "person, skin, ears, neck, clothing, pose and camera angle.")
+            head = (f"Image edit, not text-to-image. This photo shows the {angle} of a salon customer. {single} "
+                    f"{angle_rule} " + " ".join(refs) + f" Change only the {target} to this {what}, as seen from "
+                    "this angle: ")
+            rules = [look, accessory, DENSITY_RULE if service != "Beard" else "",
+                     CLOTHING_NOT_HAIR if service != "Beard" else "", keep, identity, WHITE_BACKGROUND,
+                     "Photorealistic, no drawn outline lines."]
+            tail = " " + " ".join(x for x in rules if x)
         description = _edit_description(style)
         if max_chars and len(head) + len(description) + len(tail) > max_chars:
-            room = max(0, max_chars - len(head) - len(tail) - 1)
+            room = max(30, max_chars - len(head) - len(tail) - 1)
             cut = description[:room]
-            description = (cut.rsplit(" ", 1)[0] if " " in cut else cut).rstrip(",;:") + "."
+            description = (cut.rsplit(" ", 1)[0] if " " in cut and len(cut.rsplit(" ", 1)[0]) >= 15 else cut).rstrip(",;:") + "."
         prompt = head + description + tail
         return prompt[:max_chars] if max_chars else prompt
 

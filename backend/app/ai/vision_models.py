@@ -99,6 +99,12 @@ class VisionModels:
         ))
         self._recognizer = cv2.FaceRecognizerSF.create(os.path.join(d, "face_recognition_sface_2021dec.onnx"), "")
         self._haar = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        # Person vs background (classes: 0 background, 1 hair, 2 body skin, 3 face skin, 4 clothes, 5 accessories).
+        # Optional so older installs without the file keep working (the white background then needs the model).
+        person_model = os.path.join(d, "selfie_multiclass_256x256.tflite")
+        self._person_segmenter = vision.ImageSegmenter.create_from_options(vision.ImageSegmenterOptions(
+            base_options=BaseOptions(model_asset_path=person_model), output_category_mask=True,
+        )) if os.path.isfile(person_model) else None
 
     # ------------------------------------------------------------------ face
     def _landmarks_on(self, rgb: np.ndarray) -> Optional[np.ndarray]:
@@ -159,6 +165,21 @@ class VisionModels:
         y0 = int(max(0, face.top_y - 1.2 * fh))
         y1 = int(min(h, face.chin_y + 3.0 * fh))
         return x0, y0, x1, y1
+
+    def person_mask(self, rgb: np.ndarray) -> Optional[np.ndarray]:
+        """
+        Boolean mask of the person: hair, face and body skin, clothes and accessories (jewellery, clips), i.e.
+        everything except the background. Works without a visible face (side / back photos). None when the
+        segmentation model is not installed (run ai_models/download_models.py).
+        """
+        if self._person_segmenter is None:
+            return None
+        img = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(rgb))
+        with self._lock:
+            cat = np.squeeze(self._person_segmenter.segment(img).category_mask.numpy_view())
+        if cat.shape[:2] != rgb.shape[:2]:
+            cat = cv2.resize(cat.astype(np.uint8), (rgb.shape[1], rgb.shape[0]), interpolation=cv2.INTER_NEAREST)
+        return cat > 0
 
     def hair_mask(self, rgb: np.ndarray, face: Optional[FaceGeometry]) -> np.ndarray:
         """Boolean hair mask at full image size. Segments a padded square head crop for small faces."""
