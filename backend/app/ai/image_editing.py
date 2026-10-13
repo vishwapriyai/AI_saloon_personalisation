@@ -30,7 +30,9 @@ from app.ai.prompt_engine import PROMPT_TEMPLATE_VERSION, prompt_engine
 from app.ai.vision_models import (
     LM_CHEEK_SKIN, LM_FOREHEAD_CENTER, LM_NOSE_TIP, FaceGeometry, delta_e, get_vision_models, hair_lab, portrait_box,
 )
-from app.ai.vision_models import hair_length as measure_hair_length, hair_texture
+from app.ai.vision_models import (
+    STRAIGHT_MIN_ORIENTATION, hair_orientation_consistency, hair_texture, hair_length as measure_hair_length,
+)
 from app.core.config import TEST_ONLY_PROVIDERS, settings
 from app.core.privacy import photo_cache_tag
 from app.core.security import media_path
@@ -206,6 +208,72 @@ def _added_forehead_mark(src: "SourcePhoto", edited_rgb: np.ndarray, face: FaceG
     return after >= 0.001 and before < 0.0005
 
 
+# Lower face where a beard, moustache or stubble grows: the jaw outline from cheekbone to cheekbone, closed under
+# the nose. The lips are cut out (lipstick is dark), and so is any hair covering the face.
+LM_LOWER_FACE_OUTLINE = (234, 93, 132, 58, 172, 136, 150, 149, 176, 148, 152, 377, 400, 378, 379, 365, 397, 288,
+                         361, 323, 454, 2)
+LM_OUTER_LIPS = (61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146)
+FACIAL_HAIR_DARK = 0.55           # pixel darker than this share of the median lower-face skin lightness
+FACIAL_HAIR_MIN_ADDED = 0.03      # share of the checked area that turned dark in the edit...
+FACIAL_HAIR_MIN_RATIO = 2.0       # ...and at least this many times the original (contrast changes stay below)
+FACIAL_HAIR_HALF_BAND = 0.28      # half-width of the checked central band, in face widths
+
+
+def _dark_lower_face(rgb: np.ndarray, face: FaceGeometry, hair: np.ndarray) -> Optional[float]:
+    """Share of the lower face (lips and hair excluded) that is clearly darker than the skin around it."""
+    h, w = rgb.shape[:2]
+    pts = face.points[list(LM_LOWER_FACE_OUTLINE)]
+    centre = pts.mean(axis=0)
+    pts = centre + (pts - centre) * 1.06          # a little past the jawline: chin-strap beards sit on the edge
+    region = np.zeros((h, w), np.uint8)
+    cv2.fillPoly(region, [pts.astype(np.int32)], 1)
+    lips = np.zeros((h, w), np.uint8)
+    cv2.fillPoly(lips, [face.points[list(LM_OUTER_LIPS)].astype(np.int32)], 1)
+    lips = cv2.dilate(lips, np.ones((7, 7), np.uint8))
+    # Central band only: a beard always crosses the chin and upper lip, while a new cut that frames the face
+    # puts hair (and its shadow) at the sides of the jaw, which the hair mask does not always cover fully
+    band = np.zeros((h, w), bool)
+    cx = float(np.mean([face.pt(LM_NOSE_TIP)[0], face.pt(152)[0]]))
+    band[:, int(max(0, cx - FACIAL_HAIR_HALF_BAND * face.width)):int(min(w, cx + FACIAL_HAIR_HALF_BAND * face.width))] = True
+    keep = region.astype(bool) & band & ~lips.astype(bool) & ~hair
+    if keep.sum() < 0.03 * face.width ** 2:
+        return None
+    light = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)[..., 0].astype(np.float32)
+    skin = float(np.median(light[keep]))
+    return float((light[keep] < FACIAL_HAIR_DARK * skin).mean())
+
+
+def _added_facial_hair(src: "SourcePhoto", edited_rgb: np.ndarray, face: FaceGeometry,
+                       edited_hair: np.ndarray) -> Optional[str]:
+    """A beard, moustache or stubble drawn on the face, or an existing one made clearly heavier."""
+    grow = np.ones((9, 9), np.uint8)
+    before = _dark_lower_face(src.rgb, src.face, cv2.dilate(src.hair_mask.astype(np.uint8), grow).astype(bool))
+    after = _dark_lower_face(edited_rgb, face, cv2.dilate(edited_hair.astype(np.uint8), grow).astype(bool))
+    if before is None or after is None:
+        return None
+    if after - before >= FACIAL_HAIR_MIN_ADDED and after >= FACIAL_HAIR_MIN_RATIO * before:
+        return f"facial hair added or thickened ({after:.1%} of the lower face dark, was {before:.1%})"
+    return None
+
+
+def _view_facial_hair_problem(src_rgb: np.ndarray, edited_rgb: np.ndarray) -> Optional[str]:
+    """Side views: the same check when the face (profile) is found in both photos; back views show no face."""
+    vm = get_vision_models()
+    before_face, after_face = vm.detect_face(src_rgb), vm.detect_face(edited_rgb)
+    if before_face is None or after_face is None:
+        return None
+    grow = np.ones((9, 9), np.uint8)
+    before = _dark_lower_face(src_rgb, before_face,
+                              cv2.dilate(vm.hair_mask(src_rgb, before_face).astype(np.uint8), grow).astype(bool))
+    after = _dark_lower_face(edited_rgb, after_face,
+                             cv2.dilate(vm.hair_mask(edited_rgb, after_face).astype(np.uint8), grow).astype(bool))
+    if before is None or after is None:
+        return None
+    if after - before >= FACIAL_HAIR_MIN_ADDED and after >= FACIAL_HAIR_MIN_RATIO * before:
+        return f"facial hair added or thickened ({after:.1%} of the lower face dark, was {before:.1%})"
+    return None
+
+
 def _border_difference(a: np.ndarray, b: np.ndarray, hair: np.ndarray) -> float:
     """Mean absolute RGB difference on bottom clothing area, ignoring background replaced by white studio backdrop."""
     h, w = a.shape[:2]
@@ -330,7 +398,7 @@ def add_preview_label(img: Image.Image) -> Image.Image:
 # Validation
 # ----------------------------------------------------------------------------
 # Bump when the validation rules change, so cached previews accepted under older rules are not reused
-VALIDATION_VERSION = "validate-v7-six-points"
+VALIDATION_VERSION = "validate-v8-facial-hair-curls"
 
 
 @dataclass
@@ -423,15 +491,29 @@ def _volume_problem(before_px: float, after_px: float, analysis: Optional[Dict[s
     return None
 
 
+CURL_LOOSENED_MIN_RISE = 0.12   # rise in strand-direction consistency that means the curls were loosened
+
+
 def _texture_flip(before_rgb: np.ndarray, before_mask: np.ndarray, after_rgb: np.ndarray, after_mask: np.ndarray,
-                  width: float, style: Dict[str, Any]) -> Optional[str]:
-    """Straight hair turned curly (or the reverse) by a service that must keep the texture."""
+                  width: float, style: Dict[str, Any], analysis: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Straight hair turned curly (or the reverse), or curls loosened into waves, by a service that must keep the
+    texture. The customer's confirmed texture (e.g. a stylist's "Curly") counts as curly even when the photo
+    measure is unsure."""
     if style.get("service", "Hair") == "Texture":
         return None
     before, _ = hair_texture(before_rgb, before_mask, width)
     after, _ = hair_texture(after_rgb, after_mask, width)
     if {before, after} == {"Straight", "Curly"}:
         return f"hair texture changed ({before.lower()} to {after.lower()})"
+    told_curly = str((analysis or {}).get("hair_type") or "").strip().lower() in ("curly", "coily")
+    if before == "Curly" or told_curly:
+        # Only when the original itself measures as curly on this framing (side/back photos have no face for
+        # scale and may not), and the edit clearly crosses into the wavy/straight range
+        was = hair_orientation_consistency(before_rgb, before_mask, width)
+        now = hair_orientation_consistency(after_rgb, after_mask, width)
+        if (was is not None and now is not None and was <= STRAIGHT_MIN_ORIENTATION
+                and now > STRAIGHT_MIN_ORIENTATION and now - was >= CURL_LOOSENED_MIN_RISE):
+            return f"curls loosened into waves or straight hair (strand direction {was:.2f} -> {now:.2f})"
     return None
 
 
@@ -477,9 +559,16 @@ def validate_edit(src: SourcePhoto, edited_rgb: np.ndarray, style: Dict[str, Any
     mask = vm.hair_mask(edited_rgb, face)
     if _added_forehead_mark(src, edited_rgb, face, mask):
         return Validation("something was added to the face (forehead mark)", identity)
+    if profile.service != "Beard":  # a haircut, colour or texture look never adds or thickens facial hair
+        facial_hair = _added_facial_hair(src, edited_rgb, face, mask)
+        if facial_hair:
+            return Validation(facial_hair, identity)
 
     if mask.sum() < 0.05 * face.width ** 2 and src.hair_mask.sum() >= 0.05 * face.width ** 2:
         return Validation("hair missing in the edited photo", identity)
+    bald = str((analysis or {}).get("hair_length") or "").lower() == "bald" or str(style.get("hair_length") or "").lower() == "bald"
+    if bald and src.hair_mask.sum() < 0.05 * face.width ** 2 and mask.sum() >= 0.15 * face.width ** 2:
+        return Validation("hair was added to a bald scalp", identity)
 
     aligned = cv2.warpAffine(src.rgb, M, (w, h), flags=cv2.INTER_LINEAR)
     outside = cv2.warpAffine(np.ones((h, w), np.uint8), M, (w, h), flags=cv2.INTER_NEAREST) == 0
@@ -501,7 +590,7 @@ def validate_edit(src: SourcePhoto, edited_rgb: np.ndarray, style: Dict[str, Any
         return Validation(missed, identity, hair_score)
     if profile.service != "Beard":
         problem = (_volume_problem(float(src_hair.sum()), float(mask.sum()), analysis, style)
-                   or _texture_flip(src.rgb, src.hair_mask, edited_rgb, mask, src.face.width, style))
+                   or _texture_flip(src.rgb, src.hair_mask, edited_rgb, mask, src.face.width, style, analysis))
         if problem:
             return Validation(problem, identity, hair_score)
     return Validation(None, identity, hair_score)
@@ -515,15 +604,29 @@ class GeminiEditor:
     supports_back_image = True  # other providers take one photo (+ optional style reference) only
     supports_extra_images = True
 
-    def __init__(self):
+    def __init__(self, use_vertex: bool = False):
         from google import genai  # imported lazily so the app starts without the key
-        keys = settings.get_gemini_api_keys()
-        if not keys:
-            raise ImageEditError("No GEMINI_API_KEY found in backend/.env")
-        self._keys = keys
-        self._clients = [genai.Client(api_key=k) for k in keys]
-        self._key_counter = 0
-        log_progress("GEMINI-INIT", f"Initialized Gemini Editor with Pool of {len(keys)} API Key(s)", "INFO")
+        self._is_vertex = use_vertex or settings.USE_VERTEX_AI or settings.IMAGE_EDIT_PROVIDER.lower() in ("vertexai", "vertex")
+        if self._is_vertex:
+            self._project = settings.VERTEX_AI_PROJECT or "project-5b95fd61-d6de-4a78-913"
+            self._location = settings.VERTEX_AI_LOCATION or "us-central1"
+            client = genai.Client(
+                vertexai=True,
+                project=self._project,
+                location=self._location,
+            )
+            self._clients = [client]
+            self._keys = [f"vertexai-{self._project}"]
+            self._key_counter = 0
+            log_progress("VERTEX-INIT", f"Initialized Vertex AI Gemini Editor for GCP project '{self._project}' ({self._location})", "INFO")
+        else:
+            keys = settings.get_gemini_api_keys()
+            if not keys:
+                raise ImageEditError("No GEMINI_API_KEY found in backend/.env")
+            self._keys = keys
+            self._clients = [genai.Client(api_key=k) for k in keys]
+            self._key_counter = 0
+            log_progress("GEMINI-INIT", f"Initialized Gemini Editor with Pool of {len(keys)} API Key(s)", "INFO")
 
     max_prompt_chars = None
 
@@ -561,8 +664,10 @@ class GeminiEditor:
         last_error = None
         for key_try in range(len(self._clients)):
             client, key = self._next_client()
-            masked_key = key[:6] + "..." + key[-4:] if len(key) > 10 else "***"
-            log_progress("GEMINI-REQUEST", f"Sending request using API Key #{key_try + 1}/{len(self._clients)} ({masked_key}) to '{model_name}'...")
+            masked_key = key if self._is_vertex else (key[:6] + "..." + key[-4:] if len(key) > 10 else "***")
+            log_tag = "VERTEX" if self._is_vertex else "GEMINI"
+            provider_label = f"Vertex AI ({self._project})" if self._is_vertex else f"API Key #{key_try + 1}/{len(self._clients)} ({masked_key})"
+            log_progress(f"{log_tag}-REQUEST", f"Sending request using {provider_label} to '{model_name}'...")
 
             try:
                 resp = await client.aio.models.generate_content(
@@ -573,7 +678,7 @@ class GeminiEditor:
                 for cand in resp.candidates or []:
                     for part in (cand.content.parts if cand.content else []) or []:
                         if part.inline_data and part.inline_data.data:
-                            log_progress("GEMINI-SUCCESS", f"Successfully generated image using Key ({masked_key})!", "SUCCESS")
+                            log_progress(f"{log_tag}-SUCCESS", f"Successfully generated image using {provider_label}!", "SUCCESS")
                             if usage is not None and resp.usage_metadata:
                                 um = resp.usage_metadata
                                 usage["input_tokens"] = um.prompt_token_count or 0
@@ -584,27 +689,27 @@ class GeminiEditor:
                                     usage["cost_usd"] = (usage["input_tokens"] * price[0] + usage["output_tokens"] * price[1]) / 1e6
                             return part.inline_data.data
                 reason = resp.candidates[0].finish_reason if resp.candidates else getattr(resp, "prompt_feedback", None)
-                last_error = f"Gemini returned no image (reason: {reason})"
+                last_error = f"{log_tag} returned no image (reason: {reason})"
 
             except APIError as e:
                 is_rate_limit = (e.code == 429 or "RESOURCE_EXHAUSTED" in str(e).upper() or "QUOTA" in str(e).upper())
                 if is_rate_limit and key_try < len(self._clients) - 1:
-                    log_progress("GEMINI-KEY-ROTATE", f"Key {masked_key} hit rate limit ({e.message}). Rotating to next key in pool...", "WARNING")
-                    last_error = f"Gemini API Key hit rate limits / quota exceeded ({e.message})"
+                    log_progress(f"{log_tag}-KEY-ROTATE", f"Key {masked_key} hit rate limit ({e.message}). Rotating to next key in pool...", "WARNING")
+                    last_error = f"{log_tag} hit rate limits / quota exceeded ({e.message})"
                     continue
                 else:
-                    log_api_exceeded_warning(f"Gemini (Key: {masked_key})", model_name, f"HTTP {e.code}: {e.message}")
-                    raise ImageEditError(f"Gemini API error {e.code}: {e.message}")
+                    log_api_exceeded_warning(provider_label, model_name, f"HTTP {e.code}: {e.message}")
+                    raise ImageEditError(f"{log_tag} API error {e.code}: {e.message}")
             except Exception as e:
                 err_str = str(e)
                 is_rate_limit = ("429" in err_str or "RESOURCE_EXHAUSTED" in err_str.upper() or "QUOTA" in err_str.upper())
                 if is_rate_limit and key_try < len(self._clients) - 1:
-                    log_progress("GEMINI-KEY-ROTATE", f"Key {masked_key} hit rate limit ({err_str}). Rotating to next key in pool...", "WARNING")
-                    last_error = f"Gemini API Key hit rate limit ({err_str})"
+                    log_progress(f"{log_tag}-KEY-ROTATE", f"Key {masked_key} hit rate limit ({err_str}). Rotating to next key in pool...", "WARNING")
+                    last_error = f"{log_tag} hit rate limit ({err_str})"
                     continue
-                raise ImageEditError(f"Gemini error: {err_str}")
+                raise ImageEditError(f"{log_tag} error: {err_str}")
 
-        raise ImageEditError(last_error or "Gemini generation failed across key pool")
+        raise ImageEditError(last_error or f"{log_tag} generation failed")
 
 
 class CloudflareEditor:
@@ -881,6 +986,10 @@ def _view_result_problem(src_rgb: np.ndarray, src_hair: np.ndarray, edited: np.n
     angle = _view_angle_problem(edited, view)
     if angle:
         return f"the generated {view} view {angle}"
+    if view == "side" and style.get("service", "Hair") != "Beard":
+        facial_hair = _view_facial_hair_problem(src_rgb, edited)
+        if facial_hair:
+            return facial_hair
     vm = get_vision_models()
     after_hair = vm.hair_mask(edited, None)
     before, after = _hair_extent(src_hair), _hair_extent(after_hair)
@@ -898,10 +1007,21 @@ def _view_result_problem(src_rgb: np.ndarray, src_hair: np.ndarray, edited: np.n
     if service != "Beard":
         width = src_rgb.shape[1] * 0.25  # head width estimate without a face, as in the photo analysis
         problem = (_volume_problem(float(src_hair.sum()), float(after_hair.sum()), analysis, style)
-                   or _texture_flip(src_rgb, src_hair, edited, after_hair, width, style))
+                   or _texture_flip(src_rgb, src_hair, edited, after_hair, width, style, analysis))
         if problem:
             return problem
     return None
+
+
+def _reference_matches_customer(style: Dict[str, Any], analysis: Dict[str, Any]) -> bool:
+    """A catalogue photo is a person too: a unisex or opposite-gender reference can carry over facial hair or
+    other features, so only a reference made for the customer's own collection is sent."""
+    from app.ai.prompt_engine import _is_female
+    style_gender = str(style.get("gender") or "").strip().lower()
+    customer_gender = str(analysis.get("gender") or "").strip().lower()
+    if customer_gender not in ("women", "female", "men", "male"):
+        return False
+    return style_gender == ("female" if _is_female(analysis, {}) else "male")
 
 
 class HairStyleGenerator:
@@ -921,6 +1041,8 @@ class HairStyleGenerator:
         if provider not in self._editors:
             if provider == "nvidia":
                 self._editors[provider] = nvidia_nim_client
+            elif provider in ("vertexai", "vertex"):
+                self._editors[provider] = GeminiEditor(use_vertex=True)
             elif provider in ("cloudflare", "cloudfare"):
                 self._editors[provider] = CloudflareEditor()
             elif provider == "openrouter":
@@ -1044,6 +1166,16 @@ class HairStyleGenerator:
             kwargs["back_image"] = back_jpeg
         return await editor.edit_image(tier, prompt, photo, reference, **kwargs)
 
+    def _cache_paths(self, photo_url: str, src: SourcePhoto, reference_jpeg: Optional[bytes],
+                     back_jpeg: Optional[bytes], editor: Any, style_id: Any, model: str, prompt: str) -> tuple[str, str]:
+        key = hashlib.sha256(
+            src.jpeg + (reference_jpeg or b"") + (back_jpeg if self._sends_back(editor, back_jpeg) else b"")
+            + f"|{style_id}|{model}|{PROMPT_TEMPLATE_VERSION}|{VALIDATION_VERSION}|{prompt}".encode()
+        ).hexdigest()[:32]
+        # Prefixed with the photo's tag so erasing a customer's photos also removes these copies
+        name = f"{photo_cache_tag(photo_url)}_{key}"
+        return os.path.join(self.cache_dir, f"{name}.jpg"), os.path.join(self.cache_dir, f"{name}.json")
+
     def _save(self, jpeg: bytes, style_id: Any) -> str:
         _, url = storage_service.save_bytes(jpeg, folder="generated", filename_prefix=f"gen_style_{style_id}")
         return url
@@ -1076,7 +1208,8 @@ class HairStyleGenerator:
 
         reference_jpeg = None
         if (settings.USE_STYLE_REFERENCE_IMAGE and editor.supports_reference(tier)
-                and style_metadata.get("preview_image_url") and not is_cust_bald and not is_beard_service):
+                and style_metadata.get("preview_image_url") and not is_cust_bald and not is_beard_service
+                and _reference_matches_customer(style_metadata, customer_analysis)):
             reference_jpeg = _to_jpeg(prepare_ai_input(await self._load_bytes(style_metadata["preview_image_url"])))
 
         extra_jpegs = []
@@ -1098,9 +1231,11 @@ class HairStyleGenerator:
 
         for attempt in range(settings.GENERATION_MAX_ATTEMPTS):
             attempts = attempt + 1
-            # Last attempt after a rejected preview: give the backup provider a chance instead of repeating
-            if (rejected and attempt == settings.GENERATION_MAX_ATTEMPTS - 1 and fallback
-                    and editor.name != fallback):
+            # Last attempt after a rejected preview: only when configured. The backup is usually a much smaller
+            # model (FLUX.2-klein-4B): handing it the last try after the main model's preview was rejected
+            # produced worse previews (drawn beards, loosened curls) than a strict retry on the main model.
+            if (rejected and settings.FALLBACK_AFTER_REJECTED_PREVIEW and attempt == settings.GENERATION_MAX_ATTEMPTS - 1
+                    and fallback and editor.name != fallback):
                 try:
                     editor = self._get_editor(fallback)
                     model = editor.model_for(tier)
@@ -1115,13 +1250,8 @@ class HairStyleGenerator:
             
             log_progress("STEP 3/4", f"Attempt {attempt + 1}/{settings.GENERATION_MAX_ATTEMPTS} | Prompt ({len(prompt)} chars): '{prompt[:80]}...'", "INFO")
 
-            cache_key = hashlib.sha256(
-                src.jpeg + (reference_jpeg or b"") + (back_jpeg if self._sends_back(editor, back_jpeg) else b"") + f"|{style_id}|{model}|{PROMPT_TEMPLATE_VERSION}|{VALIDATION_VERSION}|{prompt}".encode()
-            ).hexdigest()[:32]
-            # Prefixed with the photo's tag so erasing a customer's photos also removes these copies
-            cache_name = f"{photo_cache_tag(customer_image_url)}_{cache_key}"
-            cache_img = os.path.join(self.cache_dir, f"{cache_name}.jpg")
-            cache_meta = os.path.join(self.cache_dir, f"{cache_name}.json")
+            cache_img, cache_meta = self._cache_paths(customer_image_url, src, reference_jpeg, back_jpeg, editor,
+                                                      style_id, model, prompt)
             if os.path.isfile(cache_img) and os.path.isfile(cache_meta):
                 with open(cache_img, "rb") as f, open(cache_meta, encoding="utf-8") as m:
                     meta = json.load(m)
@@ -1163,6 +1293,9 @@ class HairStyleGenerator:
                                 timeout=settings.GENERATION_TIMEOUT_SECONDS,
                             )
                             fallback_handled = True
+                        # Cache the fallback's preview under its own model and prompt, not the main model's
+                        cache_img, cache_meta = self._cache_paths(customer_image_url, src, reference_jpeg, back_jpeg,
+                                                                  editor, style_id, model, prompt)
                     except Exception as fe:
                         log_progress("FALLBACK-FAILED", f"Fallback provider '{fallback}' failed: {fe}", "WARNING")
 

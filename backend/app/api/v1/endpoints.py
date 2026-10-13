@@ -920,7 +920,8 @@ def confirm_photo_analysis(photo_id: int, payload: AnalysisUpdate, db: Session =
                 features["hair_tied_back"] = False
         if field in ANALYSIS_COLUMNS and hasattr(photo, field):
             setattr(photo, field, value)
-    is_women = (customer.gender if customer else "Women").strip().capitalize() in ["Women", "Female"]
+    is_women = (customer.gender if customer and customer.gender else "Women").strip().capitalize() in ["Women", "Female"]
+    features["gender"] = "Women" if is_women else "Men"
     if is_women:
         features["beard_style_current"] = "Clean Shaven"
         features["beard_length_class"] = "Clean-shaven"
@@ -1272,9 +1273,10 @@ def get_generation_job_status(job_id: str, db: Session = Depends(get_db), princi
 # -------------------------------------------------------------
 def _analysis_for_generation(db: Session, photo: CustomerPhoto) -> dict:
     """
-    The photo analysis used to build edit prompts. Older photos have no collection stored with the analysis,
-    so it comes from the customer's profile (set when they chose Men / Women); otherwise the prompt would
-    guess the customer's gender from the style's gender.
+    The photo analysis used to build edit prompts. The collection the customer last chose (Men / Women, saved on
+    their profile by /style-recommendations) wins over the gender stored with the analysis: that one is fixed at
+    upload time and may be stale, and a woman analysed as a man gets "keep the beard" prompts (the beard check
+    reads lip and jaw shading as a beard) and bearded previews.
     """
     analysis = dict(photo.facial_features_json or {})
     if photo.original_image_url:
@@ -1283,13 +1285,15 @@ def _analysis_for_generation(db: Session, photo: CustomerPhoto) -> dict:
         analysis["back_image_url"] = photo.back_image_url
     if photo.side_image_url:
         analysis["side_image_url"] = photo.side_image_url
-    if not analysis.get("gender"):
-        customer = db.query(Customer).filter(Customer.id == photo.customer_id).first()
-        gender = (customer.gender or "").lower() if customer else ""
-        if gender in ("female", "women"):
-            analysis["gender"] = "Women"
-        elif gender in ("male", "men"):
-            analysis["gender"] = "Men"
+    customer = db.query(Customer).filter(Customer.id == photo.customer_id).first()
+    gender = (customer.gender or "").lower() if customer else ""
+    if gender in ("female", "women"):
+        analysis["gender"] = "Women"
+    elif gender in ("male", "men"):
+        analysis["gender"] = "Men"
+    if analysis.get("gender") == "Women":
+        analysis.update(beard_style_current="Clean Shaven", beard_style="Clean Shaven",
+                        beard_length_class="Clean-shaven", beard_pattern="None", beard_zones={})
     return analysis
 
 

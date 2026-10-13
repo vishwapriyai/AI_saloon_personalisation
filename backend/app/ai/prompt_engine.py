@@ -2,7 +2,7 @@ from typing import Any, Dict, Optional
 
 from app.ai.recommendation_engine import parse_trim_cm
 
-PROMPT_TEMPLATE_VERSION = "hair-edit-v31-six-points"
+PROMPT_TEMPLATE_VERSION = "hair-edit-v32-no-beard-words"
 
 UNKNOWN = "Unknown"
 # Customer lengths (measured) and catalogue finished lengths on one scale; "Any" is deliberately absent
@@ -51,6 +51,14 @@ def _is_female(analysis: Dict[str, Any], style: Dict[str, Any]) -> bool:
     """The customer's collection (stored with the analysis); the style's gender only as a fallback."""
     value = str(analysis.get("gender") or style.get("gender") or "").strip().lower()
     return value in ("female", "women", "woman")
+
+# Women: the face is described positively. Edit models (FLUX above all, which has no negative prompt) draw what a
+# prompt names, so "no beard, stubble or moustache" puts a beard on the face. Never name facial hair for a woman.
+FEMALE_FACE_FULL = ("The customer is a woman: her cheeks, upper lip, chin, jawline and neck keep exactly the same "
+                    "smooth, bare skin as in the photo.")
+FEMALE_FACE_COMPACT = "She is a woman: same smooth bare skin on cheeks, upper lip, chin and jaw."
+CLEAN_SHAVEN_FULL = ("This is a haircut only: the chin, cheeks and upper lip stay clean-shaven, exactly as in the "
+                     "photo.")
 
 TEXTURE_PHRASES = {
     "straight": "straight",
@@ -146,6 +154,23 @@ def _has_beard(analysis: Dict[str, Any]) -> bool:
     return _known(beard) and beard != "Clean Shaven"
 
 
+def _keeps_beard(analysis: Dict[str, Any], style: Dict[str, Any]) -> bool:
+    """Only a man whose photo shows a beard is told to keep it; anyone else would get one drawn."""
+    return _has_beard(analysis) and not _is_female(analysis, style)
+
+
+def _curl_rule(texture: Optional[str], compact: bool = False) -> str:
+    """Curly and coily hair is cut curly: edit models tend to loosen curls into waves or blow-dry them straight."""
+    if texture not in ("curly", "coily"):
+        return ""
+    if compact:
+        return f"Keep the same natural {texture} curls, same curl size and tightness; not waves, not blow-dried."
+    return (f"The hair is naturally {texture}: keep the customer's own curl pattern from the photo on every strand, "
+            "with the same curl size, tightness and spring, and the same curly outline. Show the new cut styled "
+            "curly, not loosened into waves and not blow-dried or straightened. If the target style mentions a "
+            "sleek, straight, smooth or blow-dried finish, apply only its length, layers and fringe shape, in curls.")
+
+
 def _known(value: Optional[str]) -> bool:
     return bool(value) and value != UNKNOWN
 
@@ -185,7 +210,8 @@ class ControlledPromptEngine:
         if is_cust_bald and service != "Beard":
             p = ("IMAGE EDIT ONLY. THE CUSTOMER IS 100% BALD. DO NOT GENERATE OR SYNTHESIZE ANY TOP HAIR OR BUZZ CUT ON THE HEAD. "
                  "Keep the scalp completely bald, smooth, and clean with natural skin texture as in the photo. Do not draw hair strands on top. "
-                 "Keep the customer's exact face, beard, skin tone, clothing, and background identical.")
+                 f"Keep the customer's exact face{', beard' if _keeps_beard(customer_analysis, style_metadata) else ''}, "
+                 "skin tone, clothing, and background identical.")
             return p[:max_chars] if max_chars else p
 
         if service == "Beard" and not _has_beard(customer_analysis) and style_metadata.get("requires_beard", True):
@@ -231,7 +257,7 @@ class ControlledPromptEngine:
 
         required = ["Image edit, not text-to-image."]
         if is_female:
-            required.append("Woman: no beard, stubble or facial hair.")
+            required.append(FEMALE_FACE_COMPACT)
         if is_cust_bald:
             required.append("The scalp is bald: add no hair on top.")
         if length_rule:
@@ -261,7 +287,10 @@ class ControlledPromptEngine:
             keep = (f"Keep the hair's natural {colour_word}colour and {texture + ' ' if texture else ''}texture "
                     "(do not straighten or smooth it), its density and hairline.")
         optional = [keep]
-        if not is_beard and _has_beard(analysis) and not is_female:
+        curls = _curl_rule(texture, compact=True) if service in ("Hair", "Colour") else ""
+        if curls:
+            optional.insert(0, curls)
+        if not is_beard and _keeps_beard(analysis, style):
             optional.append("Keep the beard and moustache exactly as they are.")
         if not is_beard:
             optional.append("Do not add volume or density.")
@@ -302,8 +331,7 @@ class ControlledPromptEngine:
             "generation task.",
         ]
         if is_female:
-            parts.append("The customer is a woman: add no beard, stubble, moustache or other facial hair; the face, "
-                         "cheeks, chin and jawline stay smooth.")
+            parts.append(FEMALE_FACE_FULL)
         # Only when the analysis found the hair tied back; loose hair must not be told it is tied (the model
         # would invent length), and a shorter cut must not be told to keep the full length
         untie = _untie_sentence(customer_analysis, style_metadata)
@@ -338,7 +366,7 @@ class ControlledPromptEngine:
             parts.append(f"Target colour: {description}")
             parts.append("Make the colour look like a professional salon result: natural dimension, even coverage "
                          "and natural-looking roots.")
-            if _has_beard(customer_analysis):
+            if _keeps_beard(customer_analysis, style_metadata):
                 parts.append("Keep the beard and moustache exactly as they are.")
         elif service == "Texture":
             parts.append("ONLY CHANGE THE HAIR TEXTURE. Keep the exact haircut, length, shape and hairline as they "
@@ -347,7 +375,7 @@ class ControlledPromptEngine:
             colour = customer_analysis.get("hair_color_detected")
             parts.append(f"Preserve the customer's natural hair colour{f' ({colour.lower()})' if _known(colour) else ''} "
                          "and root colour exactly.")
-            if _has_beard(customer_analysis):
+            if _keeps_beard(customer_analysis, style_metadata):
                 parts.append("Keep the beard and moustache exactly as they are.")
         elif is_beard:
             parts.append("ONLY MODIFY THE BEARD AND MOUSTACHE. Do not change the top hairstyle.")
@@ -365,8 +393,10 @@ class ControlledPromptEngine:
             )
         else:
             parts.append("ONLY MODIFY THE HAIR ON THE HEAD.")
-            if not is_female:
+            if _keeps_beard(customer_analysis, style_metadata):
                 parts.append("This is a haircut only: keep the beard, moustache and stubble exactly as they are.")
+            elif not is_female:
+                parts.append(CLEAN_SHAVEN_FULL)
             style_line = f"Target hairstyle (a normal salon haircut): {description}"
             details = [d for d in (
                 f"category {category}" if category else None,
@@ -417,6 +447,9 @@ class ControlledPromptEngine:
                 f"Keep the natural {texture + ' ' if texture else ''}texture and wave/curl pattern exactly; do not "
                 "straighten, smooth or curl the strands."
             )
+            curls = _curl_rule(texture)
+            if curls:
+                lines.append(curls)
         lines.append(DENSITY_RULE)
         lines.append("Preserve the customer's natural hairline and natural hair growth direction.")
 
@@ -439,7 +472,7 @@ class ControlledPromptEngine:
         if not _known(current_len):
             lines.append("If the hair is tied back or partly hidden, show it let down and cut in the new style, "
                          "using the same hair colour and texture.")
-        if _has_beard(analysis) and not is_female:
+        if _keeps_beard(analysis, style):
             lines.append("Keep the beard and moustache exactly as they are.")
         lines.append("Show a clean haircut: do not braid the hair or put it in a ponytail or bun.")
         lines.append("Adapt the hairstyle to the customer's actual hair.")
@@ -475,8 +508,11 @@ class ControlledPromptEngine:
                     f"do not make it longer or shorter." if words else
                     "The finished length is exactly as in the front preview.")
             look += f" Same natural {colour_str}colour and {texture_str}texture as the front."
+            curls = _curl_rule(texture, compact=compact)
+            if curls:
+                look += " " + curls
             keep = "Keep the natural hairline and neckline."
-            if _has_beard(analysis) and not is_female:
+            if _keeps_beard(analysis, style):
                 keep += " Keep the beard exactly as it is."
         elif service == "Colour":
             look = "Keep the exact cut and length; change only the colour, as in the front preview."
@@ -488,7 +524,7 @@ class ControlledPromptEngine:
             look = "Do not change the hair on the head."
             keep = "Keep the natural beard density and growth area; add no beard where there is none."
         if is_female:
-            keep += " Keep the face smooth, with no facial hair."
+            keep += " Keep her smooth bare facial skin as in the photo."
         accessory = _accessory_rule(analysis, style)
         angle_rule = BACK_VIEW_RULE if view == "back" else SIDE_VIEW_RULE
 

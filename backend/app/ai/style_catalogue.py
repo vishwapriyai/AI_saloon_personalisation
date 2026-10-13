@@ -498,7 +498,7 @@ HAIRSTYLE_CATALOGUE = [
         "preview_image_url": None
     },
     {
-        "id": 101,
+        "id": 34,  # was 101, which the beard catalogue also uses
         "style_code": "HAIR_M_101",
         "name": "Clean Shaved Scalp & Polished Finish",
         "gender": "Male",
@@ -515,7 +515,7 @@ HAIRSTYLE_CATALOGUE = [
         "preview_image_url": "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=600&auto=format&fit=crop"
     },
     {
-        "id": 102,
+        "id": 35,  # was 102, which the beard catalogue also uses
         "style_code": "HAIR_M_102",
         "name": "Ultra-Short Precision Clipper Buzz (#0 Guard)",
         "gender": "Male",
@@ -532,7 +532,7 @@ HAIRSTYLE_CATALOGUE = [
         "preview_image_url": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=600&auto=format&fit=crop"
     },
     {
-        "id": 103,
+        "id": 36,  # was 103, which the beard catalogue also uses
         "style_code": "HAIR_M_103",
         "name": "Clean Scalp Shave + Beard Sculpting",
         "gender": "Male",
@@ -549,7 +549,7 @@ HAIRSTYLE_CATALOGUE = [
         "preview_image_url": "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=600&auto=format&fit=crop"
     },
     {
-        "id": 104,
+        "id": 37,  # was 104, which the beard catalogue also uses
         "style_code": "HAIR_U_104",
         "name": "Scalp Detox & Hairline Micro-shading",
         "gender": "Unisex",
@@ -665,6 +665,163 @@ HAIRSTYLE_CATALOGUE = [
         "requires_chemical_service": False,
         "description": 'Trendy wolf cut: choppy volume at the crown blending into wispy, longer ends.',
         "stylist_instructions": '1. Cut short choppy layers at the crown with a razor.\n2. Keep length at the back and sides, thinned out.\n3. Add a curtain fringe.\n4. Scrunch-dry with texture spray.',
+        "preview_image_url": None
+    },
+    # ------------------------------------------------------------------
+    # CURLY HAIR (women): cut dry, curl by curl, and worn curly. Without these, curly customers were only offered
+    # straight / blow-dried looks, and the edit model straightened their curls to match the description.
+    # ------------------------------------------------------------------
+    {
+        "id": 38,
+        "style_code": "HAIR_W_C01",
+        "name": "Long Curly Layers",
+        "gender": "Female",
+        "category": "Classic",
+        "face_shapes": ['Oval', 'Round', 'Square', 'Heart', 'Diamond', 'Rectangle'],
+        "hair_types": ['2C', '3A', '3B', '3C', '4A'],
+        "hair_length": "Long",
+        "hair_density": "Medium",
+        "recommended_hair_densities": ['Medium', 'Thick'],
+        "maintenance_level": "Low",
+        "requires_chemical_service": False,
+        "description": 'Long curls kept at their length, with soft layers cut curl by curl to remove bulk and add bounce.',
+        "stylist_instructions": '1. Cut dry, curl by curl, in the natural fall.\n2. Remove weight through the mid-lengths with long layers.\n3. Take only the trim the customer chose off the ends.\n4. Diffuse-dry with curl cream; no blow-dry or straightening.',
+        "preview_image_url": None
+    },
+    {
+        "id": 39,
+        "style_code": "HAIR_W_C02",
+        "name": "Curly Shag + Curtain Fringe",
+        "gender": "Female",
+        "category": "Trendy",
+        "face_shapes": ['Oval', 'Heart', 'Diamond', 'Rectangle', 'Square'],
+        "hair_types": ['2C', '3A', '3B', '3C'],
+        "hair_length": "Medium",
+        "hair_density": "Medium",
+        "recommended_hair_densities": ['Medium', 'Thick'],
+        "maintenance_level": "Medium",
+        "requires_chemical_service": False,
+        "description": 'Curly shag: shorter curly layers at the crown and a curly curtain fringe, ends around the shoulders.',
+        "stylist_instructions": '1. Cut dry, curl by curl.\n2. Shorter layers at the crown for lift.\n3. Cut a curly curtain fringe that springs to the cheekbones.\n4. Diffuse-dry; do not stretch the curls.',
+        "preview_image_url": None
+    },
+    {
+        "id": 40,
+        "style_code": "HAIR_W_C03",
+        "name": "Rounded Curly Layers",
+        "gender": "Female",
+        "category": "Trendy",
+        "face_shapes": ['Oval', 'Heart', 'Diamond', 'Rectangle'],
+        "hair_types": ['3A', '3B', '3C', '4A', '4B'],
+        "hair_length": "Long",
+        "hair_density": "Thick",
+        "recommended_hair_densities": ['Medium', 'Thick'],
+        "maintenance_level": "Low",
+        "requires_chemical_service": False,
+        "description": 'Long curls shaped into a rounded silhouette with volume at the sides and crown and length kept at the back.',
+        "stylist_instructions": '1. Cut dry in the natural curl pattern.\n2. Shape a rounded outline with stacked layers around the face and crown.\n3. Keep the length at the back.\n4. Diffuse-dry with curl definer.',
+        "preview_image_url": None
+    },
+    {
+        "id": 41,
+        "style_code": "HAIR_W_C04",
+        "name": "Curly Lob",
+        "gender": "Female",
+        "category": "Classic",
+        "face_shapes": ['Oval', 'Round', 'Square', 'Heart', 'Diamond'],
+        "hair_types": ['2C', '3A', '3B', '3C', '4A'],
+        "hair_length": "Lob",
+        "hair_density": "Medium",
+        "recommended_hair_densities": ['Medium', 'Thick'],
+        "maintenance_level": "Low",
+        "requires_chemical_service": False,
+        "description": 'Curly lob: curls cut to just above the shoulders with light layers so the shape is not triangular.',
+        "stylist_instructions": '1. Cut dry to just above the shoulders, allowing for curl shrinkage.\n2. Add light internal layers to avoid a triangle shape.\n3. Diffuse-dry with curl cream.',
+        "preview_image_url": None
+    },
+    {
+        "id": 42,
+        "style_code": "HAIR_W_C05",
+        "name": "Polished Defined Long Curls",
+        "gender": "Female",
+        "category": "Professional",
+        "face_shapes": ['Oval', 'Round', 'Square', 'Heart', 'Diamond', 'Rectangle'],
+        "hair_types": ['2C', '3A', '3B', '3C', '4A'],
+        "hair_length": "Long",
+        "hair_density": "Medium",
+        "recommended_hair_densities": ['Fine', 'Medium', 'Thick'],
+        "maintenance_level": "Medium",
+        "requires_chemical_service": False,
+        "description": 'Long, neatly defined curls with a clean side parting and tidy, even ends for a polished office look.',
+        "stylist_instructions": '1. Trim the ends evenly, curl by curl.\n2. Long, subtle layers only.\n3. Set a clean side parting.\n4. Define curls with gel or cream and diffuse; minimise frizz.',
+        "preview_image_url": None
+    },
+    {
+        "id": 43,
+        "style_code": "HAIR_W_C06",
+        "name": "Curly Bob",
+        "gender": "Female",
+        "category": "Trendy",
+        "face_shapes": ['Oval', 'Heart', 'Diamond', 'Rectangle'],
+        "hair_types": ['3A', '3B', '3C', '4A', '4B'],
+        "hair_length": "Bob",
+        "hair_density": "Medium",
+        "recommended_hair_densities": ['Medium', 'Thick'],
+        "maintenance_level": "Medium",
+        "requires_chemical_service": False,
+        "description": 'Chin-length curly bob with rounded volume and defined curls around the face.',
+        "stylist_instructions": '1. Cut dry to chin length, allowing for shrinkage.\n2. Round the outline with short internal layers.\n3. Diffuse-dry; do not stretch the curls.',
+        "preview_image_url": None
+    },
+    {
+        "id": 44,
+        "style_code": "HAIR_W_C07",
+        "name": "Polished Curly Lob + Side Part",
+        "gender": "Female",
+        "category": "Professional",
+        "face_shapes": ['Oval', 'Round', 'Square', 'Heart', 'Diamond', 'Rectangle'],
+        "hair_types": ['2C', '3A', '3B', '3C'],
+        "hair_length": "Lob",
+        "hair_density": "Medium",
+        "recommended_hair_densities": ['Medium', 'Thick'],
+        "maintenance_level": "Medium",
+        "requires_chemical_service": False,
+        "description": 'Shoulder-length curly lob with a deep side parting and neat, defined curls.',
+        "stylist_instructions": '1. Cut dry to the shoulders, curl by curl.\n2. Keep the outline even and weight balanced.\n3. Set a deep side parting.\n4. Define curls and diffuse-dry.',
+        "preview_image_url": None
+    },
+    {
+        "id": 45,
+        "style_code": "HAIR_W_C08",
+        "name": "Face-Framing Curly Layers",
+        "gender": "Female",
+        "category": "Classic",
+        "face_shapes": ['Oval', 'Round', 'Square', 'Heart', 'Diamond', 'Rectangle'],
+        "hair_types": ['2C', '3A', '3B', '3C', '4A'],
+        "hair_length": "Medium",
+        "hair_density": "Medium",
+        "recommended_hair_densities": ['Medium', 'Thick'],
+        "maintenance_level": "Low",
+        "requires_chemical_service": False,
+        "description": 'Shoulder-length curls with shorter curly pieces framing the face from the cheekbones down.',
+        "stylist_instructions": '1. Cut dry, curl by curl, to the shoulders.\n2. Cut face-framing curls starting at the cheekbones.\n3. Diffuse-dry with curl cream.',
+        "preview_image_url": None
+    },
+    {
+        "id": 46,
+        "style_code": "HAIR_W_C09",
+        "name": "Long Curls + Curly Curtain Fringe",
+        "gender": "Female",
+        "category": "Trendy",
+        "face_shapes": ['Oval', 'Heart', 'Diamond', 'Rectangle', 'Square'],
+        "hair_types": ['2C', '3A', '3B', '3C', '4A'],
+        "hair_length": "Long",
+        "hair_density": "Medium",
+        "recommended_hair_densities": ['Medium', 'Thick'],
+        "maintenance_level": "Medium",
+        "requires_chemical_service": False,
+        "description": 'Long curls kept at their length with a curly curtain fringe and face-framing curls.',
+        "stylist_instructions": '1. Cut dry, curl by curl; keep the length.\n2. Cut a curly curtain fringe that springs to the cheekbones.\n3. Add face-framing curls.\n4. Diffuse-dry with curl cream.',
         "preview_image_url": None
     },
     # ------------------------------------------------------------------
@@ -1137,6 +1294,15 @@ EDIT_DESCRIPTIONS = {
     208: 'Change only the hair colour: add fine cool ash-blonde highlights on the top of the hair only, keeping the sides and the natural base colour dark.',
     209: 'Change only the hair colour: add warm copper highlights through the hair, brightest around the face, keeping the natural base colour between them.',
     301: 'Change only the hair texture: make the hair smooth, sleek and frizz-free with a healthy shine, at the same length and cut.',
+    38: "Long curly hair kept at its length, with long layers cut curl by curl to remove bulk: defined, bouncy curls from the roots to the ends, the same curl size as before, nothing straightened.",
+    39: "Curly shag: shorter curly layers at the top of the head for lift, a curly curtain fringe that springs to the cheekbones, curly ends around the shoulders; every strand stays curly.",
+    40: "Long curly hair shaped into a rounded outline: stacked curly layers give volume at the sides and top, the length stays long at the back; defined curls throughout.",
+    41: "Curly lob: curls cut to just above the shoulders with light layers so the outline is rounded, not triangular; defined curls, not straightened.",
+    42: "Long, neatly defined curls with a clean side parting and tidy, even ends; low frizz, curls kept at their natural size, not blow-dried.",
+    43: "Chin-length curly bob with a rounded outline and defined curls around the face; every strand stays curly.",
+    44: "Shoulder-length curly lob with a deep side parting and neat, defined curls of the same size as before.",
+    45: "Shoulder-length curly hair with shorter curly pieces framing the face from the cheekbones down; defined curls throughout.",
+    46: "Long curly hair kept at its length, with a curly curtain fringe that springs to the cheekbones and shorter curls framing the face; defined curls throughout, nothing straightened.",
     302: 'Change only the hair texture: make the hair soft, healthy and shiny with much less frizz, keeping its natural movement, length and cut.',
     303: 'Change only the hair texture to loose, soft beach waves from the mid-lengths to the ends, at the same length and colour.',
     304: 'Change only the hair texture to completely straight, smooth and glossy hair, at the same length and colour.',
@@ -1160,6 +1326,9 @@ for _style in HAIRSTYLE_CATALOGUE + BEARD_CATALOGUE:
 
 ALL_STYLES = HAIRSTYLE_CATALOGUE + BEARD_CATALOGUE
 STYLES_BY_ID = {style["id"]: style for style in ALL_STYLES}
+# A shared id makes get_style() return the other style (e.g. a beard for a haircut) and attaches the wrong edit
+# description to the prompt
+assert len(STYLES_BY_ID) == len(ALL_STYLES), "duplicate style ids in the catalogue"
 
 # Service names as sent by the app's service picker
 SERVICE_ALIASES = {

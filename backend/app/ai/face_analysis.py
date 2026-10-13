@@ -20,6 +20,9 @@ UPLOAD_MAX_SIDE = 2048
 # Face width (at the 1024 px analysis size) below which face checks and previews are unreliable: SFace
 # identity checks work on 112 px aligned faces, and smaller faces are upscaled a lot for the preview crop.
 MIN_FACE_WIDTH_PX = 120
+# Hair reaching this close to the bottom of the front photo runs out of the frame: its measured length is only a
+# lower bound (a chest-up photo of long hair reads "Medium"), so a side/back photo may lengthen it
+FRAME_CUT_OFF_FRACTION = 0.92
 
 
 def normalize_photo(image_bytes: bytes) -> bytes:
@@ -126,6 +129,7 @@ class FaceAnalyzer:
         hair_px = int(mask.sum())
         hair_visible = hair_px >= 0.05 * face.width ** 2
         length, length_conf = hair_length(mask, face) if hair_visible else ("Bald", 0.95)
+        hair_cut_off_by_frame = bool(hair_visible and np.nonzero(mask)[0].max() >= FRAME_CUT_OFF_FRACTION * H)
         if length == "Bald":
             # Little hair segmented: a bare scalp, or a buzz cut the segmenter missed. A buzz cut must not
             # lock out haircuts, so the scalp is checked separately; the stylist confirms either way.
@@ -246,6 +250,7 @@ class FaceAnalyzer:
             "hair_type_confidence": round(texture_conf, 2),
             "hair_length": length,
             "hair_length_confidence": round(length_conf, 2),
+            "hair_length_cut_off_by_frame": hair_cut_off_by_frame and length in ("Short", "Medium", "Long"),
             # Bald vs buzz cannot be certain from one photo (light hair on light skin): ask for confirmation
             "hair_length_needs_confirmation": length in ("Bald", "Buzz"),
             "hairline": hairline,
@@ -384,6 +389,10 @@ class FaceAnalyzer:
                     detected_len = extra_len
                     if is_women and front_len == "Short":
                         hair_tied_back = True
+                elif front.get("hair_length_cut_off_by_frame") and extra_len in ("Long", "Very Long") and longer:
+                    # The front photo cuts the hair off, so its reading is a lower bound. The side/back photo has
+                    # no face for scale, so it lengthens the reading to "Long" at most; the stylist confirms.
+                    detected_len = max(detected_len, "Long", key=lambda v: LENGTH_ORDER.get(v, -1))
                 elif extra_len in ("Long", "Very Long") and longer:
                     back_suggests_longer = True
                 if detected_density == UNKNOWN and extra.get("hair_density") and extra.get("hair_density") != UNKNOWN:

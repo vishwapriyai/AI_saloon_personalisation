@@ -436,6 +436,20 @@ class HairstyleRecommendationEngine:
             return style_gender != "female"
         return True
 
+    @staticmethod
+    def _texture_matches(styles: List[Dict[str, Any]], hair_type: Optional[str]) -> List[Dict[str, Any]]:
+        """
+        Haircuts made for the customer's texture, when there are enough of them to fill the page. A haircut keeps
+        the texture: offering a sleek blow-dried look to curly hair (or a curly shag to straight hair) shows a
+        result the cut cannot give, and the edit model changes the hair's structure to match the description.
+        Styles without texture tags count as matching.
+        """
+        family = TEXTURE_FAMILY.get((hair_type or "").strip().lower())
+        if not family:
+            return styles
+        matching = [s for s in styles if not s.get("hair_types") or family in {c[:1] for c in s["hair_types"]}]
+        return matching if len(matching) >= settings.STYLE_RECOMMENDATION_COUNT else styles
+
     def recommend(
         self,
         face_shape: str,
@@ -474,12 +488,15 @@ class HairstyleRecommendationEngine:
                 if known:
                     closest = min(known)
                     trimmed = [st for st in candidates if drops[id(st)] is None or drops[id(st)] <= closest]
+            pool = trimmed or candidates
+            if service == "Hair":
+                pool = self._texture_matches(pool, hair_type)
             scored = [
                 self._score(style, face_shape=face_shape, hair_length=hair_length, hair_density=hair_density,
                             hair_type=hair_type, beard_style=beard_style, user_gender=user_gender,
                             style_category=style_category, expert_rules=expert_rules, growth_map=growth_map,
                             trim_preference=trim_preference)
-                for style in (trimmed or candidates)
+                for style in pool
             ]
             scored.sort(key=lambda x: x["score"], reverse=True)
             usable = [x["style"] for x in scored if x["score"] > -100.0]

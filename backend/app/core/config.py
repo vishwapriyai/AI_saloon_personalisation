@@ -83,6 +83,10 @@ class Settings(BaseSettings):
             keys.append(self.GEMINI_API_KEY.strip())
         return keys
 
+    USE_VERTEX_AI: bool = False
+    VERTEX_AI_PROJECT: str = "project-5b95fd61-d6de-4a78-913"
+    VERTEX_AI_LOCATION: str = "us-central1"
+
     GEMINI_FAST_MODEL: str = "gemini-2.5-flash-image"        # 8 previews
     GEMINI_HQ_MODEL: str = "gemini-3-pro-image-preview"      # final reference of the chosen style
     NVIDIA_NGC_API_KEY: str = ""
@@ -115,6 +119,9 @@ class Settings(BaseSettings):
     PROVIDER_REQUEST_RETRIES: int = 2              # tries per attempt when the provider hangs or has a transient error
     # Optional second provider tried when the main one is unavailable (e.g. "huggingface"); empty = none
     IMAGE_EDIT_FALLBACK_PROVIDER: str = ""
+    # Use the fallback provider for the last attempt after the main provider's preview failed validation. Off: the
+    # fallback (e.g. Cloudflare FLUX.2-klein-4B) is far weaker, so it is only used when the main provider fails.
+    FALLBACK_AFTER_REJECTED_PREVIEW: bool = False
     GENERATION_MAX_ATTEMPTS: int = 2
     # Send the catalogue reference photo as a second image. Enable only after every style has a
     # curated reference photo that really shows that style (the current Unsplash URLs do not).

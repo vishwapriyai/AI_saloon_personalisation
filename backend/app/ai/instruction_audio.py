@@ -37,8 +37,9 @@ def _source_hash(steps: List[str]) -> str:
 
 
 async def _translate_with_gemini(steps: List[str], language: str) -> Optional[List[str]]:
+    use_vertex = getattr(settings, "USE_VERTEX_AI", False) or getattr(settings, "IMAGE_EDIT_PROVIDER", "").lower() in ("vertexai", "vertex")
     key = settings.get_gemini_api_key() if hasattr(settings, "get_gemini_api_key") else os.getenv("GEMINI_API_KEY", "")
-    if not key:
+    if not use_vertex and not key:
         return None
     from google import genai
 
@@ -50,14 +51,21 @@ async def _translate_with_gemini(steps: List[str], language: str) -> Optional[Li
         "Reply with only the translated steps, one per line, numbered 1., 2., 3. ...\n\n" + numbered
     )
     try:
-        client = genai.Client(api_key=key)
+        if use_vertex:
+            client = genai.Client(
+                vertexai=True,
+                project=settings.VERTEX_AI_PROJECT,
+                location=settings.VERTEX_AI_LOCATION
+            )
+        else:
+            client = genai.Client(api_key=key)
         resp = await client.aio.models.generate_content(model=TRANSLATION_MODEL, contents=prompt)
         lines = _clean_steps(resp.text or "")
         if len(lines) == len(steps):
             return lines
         logger.warning("Translation returned %d steps for %d; ignoring", len(lines), len(steps))
     except Exception as e:
-        logger.warning("Translation with Gemini key failed: %s", type(e).__name__)
+        logger.warning("Translation with Gemini/Vertex AI failed: %s", type(e).__name__)
     return None
 
 

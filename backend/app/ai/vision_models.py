@@ -245,23 +245,23 @@ def delta_e(lab_a: np.ndarray, lab_b: np.ndarray) -> float:
     return float(np.linalg.norm(lab_a - lab_b))
 
 
-def hair_texture(rgb: np.ndarray, mask: np.ndarray, face_width: float) -> tuple[str, float]:
-    """
-    Straight / Wavy / Curly from strand-orientation coherence (structure tensor) inside the hair mask,
-    measured at a fixed scale (face width normalised to 200 px).
+# Orientation consistency of the strands over a few curl widths: curls turn every few pixels (low), waves and
+# straight hair keep one direction (high). Coherence alone cannot tell tight curls from tied-back straight hair.
+CURLY_MAX_ORIENTATION = 0.60
+STRAIGHT_MIN_ORIENTATION = 0.70  # above this the hair is not curly (used to catch curls loosened by an edit)
 
-    This single measure overlaps a lot between textures (e.g. dense wavy hair can look as coherent as
-    tied-back straight hair), so only clear-cut values get a label and everything in between is
-    Unknown. A wrong label is worse than none: the edit prompt would push the hair toward it.
-    """
+
+def _hair_orientation_stats(rgb: np.ndarray, mask: np.ndarray, face_width: float) -> Optional[tuple[float, float]]:
+    """(coherence, orientation consistency) of the hair strands at a fixed scale (face width normalised to
+    200 px); None when too little hair is visible to measure."""
     if mask.sum() < 2500 or face_width < 80:
-        return UNKNOWN, 0.0
+        return None
     scale = 200.0 / face_width
     small = cv2.resize(rgb, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
     small_mask = cv2.resize(mask.astype(np.uint8), (small.shape[1], small.shape[0]), interpolation=cv2.INTER_NEAREST)
     inner = cv2.erode(small_mask, np.ones((5, 5), np.uint8), iterations=2).astype(bool)
     if inner.sum() < 3000:
-        return UNKNOWN, 0.0
+        return None
     gray = cv2.cvtColor(small, cv2.COLOR_RGB2GRAY).astype(np.float32)
     gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
@@ -269,10 +269,32 @@ def hair_texture(rgb: np.ndarray, mask: np.ndarray, face_width: float) -> tuple[
     jyy = cv2.GaussianBlur(gy * gy, (0, 0), 4)
     jxy = cv2.GaussianBlur(gx * gy, (0, 0), 4)
     coherence = np.sqrt((jxx - jyy) ** 2 + 4 * jxy ** 2) / (jxx + jyy + 1e-6)
-    c = float(np.mean(coherence[inner]))
+    doubled = np.arctan2(2 * jxy, jxx - jyy)
+    consistency = np.hypot(cv2.GaussianBlur(np.cos(doubled), (0, 0), 12), cv2.GaussianBlur(np.sin(doubled), (0, 0), 12))
+    return float(np.mean(coherence[inner])), float(np.mean(consistency[inner]))
+
+
+def hair_orientation_consistency(rgb: np.ndarray, mask: np.ndarray, face_width: float) -> Optional[float]:
+    stats = _hair_orientation_stats(rgb, mask, face_width)
+    return stats[1] if stats else None
+
+
+def hair_texture(rgb: np.ndarray, mask: np.ndarray, face_width: float) -> tuple[str, float]:
+    """
+    Straight / Wavy / Curly from strand-orientation coherence (structure tensor) inside the hair mask, and
+    how consistently the strands keep one direction over a few curl widths, measured at a fixed scale.
+
+    These measures overlap between textures (e.g. dense wavy hair can look as coherent as tied-back
+    straight hair), so only clear-cut values get a label and everything in between is Unknown. A wrong
+    label is worse than none: the edit prompt would push the hair toward it.
+    """
+    stats = _hair_orientation_stats(rgb, mask, face_width)
+    if stats is None:
+        return UNKNOWN, 0.0
+    c, consistency = stats
     if c >= 0.75:
         return "Straight", 0.7
-    if c < 0.35:
+    if c < 0.35 or consistency < CURLY_MAX_ORIENTATION:
         return "Curly", 0.6
     if 0.42 <= c < 0.55:
         return "Wavy", 0.6
