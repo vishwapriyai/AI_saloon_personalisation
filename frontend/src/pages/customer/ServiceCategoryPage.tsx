@@ -5,6 +5,14 @@ import { getRecommendations, getLastPreferences } from '../../api/client';
 import { currentCustomerId } from '../../auth/session';
 import { HairAnalysisCard } from '../../components/HairAnalysisCard';
 
+/** "Hair Cut & Trim Length Preference" buttons; `value` is what the server reads (see parse_trim_cm). */
+const TRIM_OPTIONS = [
+  { id: '0cm', title: 'Keep Original Length', desc: '0 - 1 cm micro-trim', value: '0 - 1 cm micro-trim' },
+  { id: '2cm', title: 'Slight Trim', desc: '1 - 2 cm short', value: '2cm' },
+  { id: '5cm', title: 'Medium Cut', desc: '3 - 5 cm short', value: '5cm' },
+  { id: 'custom', title: 'Custom Cut', desc: 'Specify cm / mm short', value: '' },
+];
+
 export const ServiceCategoryPage: React.FC = () => {
   const navigate = useNavigate();
   // Check if customer photo analysis indicates a bald or clean shaved scalp or gender
@@ -24,8 +32,12 @@ export const ServiceCategoryPage: React.FC = () => {
   });
   const [selectedServices, setSelectedServices] = useState<string[]>(['Hair']);
   const [selectedCategory, setSelectedCategory] = useState<'Classic' | 'Trendy' | 'Professional'>('Trendy');
-  const [trimPreference, setTrimPreference] = useState<string>(() => localStorage.getItem('salon_trim_preference') || '0cm');
-  const [customTrimVal, setCustomTrimVal] = useState<string>('2 cm');
+  // Which trim button is chosen ('' = no preference: any cut). The value sent to the server is derived from it.
+  const [trimPreference, setTrimPreference] = useState<string>(() => {
+    const saved = localStorage.getItem('salon_trim_choice') || '';
+    return TRIM_OPTIONS.some((o) => o.id === saved) ? saved : '';
+  });
+  const [customTrimVal, setCustomTrimVal] = useState<string>(() => localStorage.getItem('salon_trim_custom') || '2 cm');
   const [loading, setLoading] = useState(false);
   const [fromLastVisit, setFromLastVisit] = useState(false);
   // Bumped when the stylist corrects the analysis (e.g. beard or baldness misread) so the service rules re-run
@@ -43,8 +55,8 @@ export const ServiceCategoryPage: React.FC = () => {
   }, [selectedGender]);
 
   useEffect(() => {
-    const finalVal = trimPreference === 'custom' ? (customTrimVal || '2 cm') : trimPreference;
-    localStorage.setItem('salon_trim_preference', finalVal);
+    localStorage.setItem('salon_trim_choice', trimPreference);
+    localStorage.setItem('salon_trim_custom', customTrimVal);
   }, [trimPreference, customTrimVal]);
 
   // Returning customers: pre-select what they chose last time (they can still change it)
@@ -146,10 +158,12 @@ export const ServiceCategoryPage: React.FC = () => {
     const photoId = Number(localStorage.getItem('salon_photo_id') || 0);
 
     try {
-      const activeTrim = trimPreference === 'custom' && customTrimVal.trim()
-        ? customTrimVal.trim()
-        : (trimPreference === '0cm' ? '0 - 1 cm micro-trim' : trimPreference);
-      localStorage.setItem('salon_trim_preference', activeTrim);
+      // No trim choice = any cut: nothing is sent, and the previews are not limited in length
+      const activeTrim = trimPreference === 'custom'
+        ? (customTrimVal.trim() || undefined)
+        : TRIM_OPTIONS.find((o) => o.id === trimPreference)?.value;
+      if (activeTrim) localStorage.setItem('salon_trim_preference', activeTrim);
+      else localStorage.removeItem('salon_trim_preference');
 
       const rec = await getRecommendations({
         customer_id: customerId,
@@ -347,21 +361,19 @@ export const ServiceCategoryPage: React.FC = () => {
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center justify-between">
             <span>4. Hair Cut & Trim Length Preference</span>
-            <span className="text-amber-400 font-normal text-[11px]">Specify exact length to trim</span>
+            <span className="text-amber-400 font-normal text-[11px]">
+              {trimPreference ? 'Tap again to clear' : 'Optional: no choice shows any cut length'}
+            </span>
           </h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { id: '0cm', title: 'Keep Original Length', desc: '0 - 1 cm micro-trim' },
-              { id: '2cm', title: 'Slight Trim', desc: '1 - 2 cm short' },
-              { id: '5cm', title: 'Medium Cut', desc: '3 - 5 cm short' },
-              { id: 'custom', title: 'Custom Cut', desc: 'Specify cm / mm short' },
-            ].map((option) => {
+            {TRIM_OPTIONS.map((option) => {
               const isSelected = trimPreference === option.id;
               return (
                 <button
                   key={option.id}
                   type="button"
-                  onClick={() => setTrimPreference(option.id)}
+                  aria-pressed={isSelected}
+                  onClick={() => setTrimPreference(isSelected ? '' : option.id)}
                   className={`p-3.5 rounded-2xl text-left border transition-all touch-target-large active:scale-95 ${
                     isSelected
                       ? 'bg-amber-500/10 border-amber-500 text-white ring-2 ring-amber-500/30 shadow-sm'
@@ -401,7 +413,7 @@ export const ServiceCategoryPage: React.FC = () => {
           className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-4 rounded-2xl text-lg shadow-sm active:scale-[0.98] transition-all flex items-center justify-center space-x-2 touch-target-large"
         >
           <Sparkles className="w-6 h-6 text-slate-950" />
-          <span>Generate My 4 Personalized Looks</span>
+          <span>Generate My Personalized Looks</span>
           <ArrowRight className="w-5 h-5" />
         </button>
       </div>

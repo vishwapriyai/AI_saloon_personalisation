@@ -1,8 +1,8 @@
 from typing import Any, Dict, Optional
 
-from app.ai.recommendation_engine import parse_trim_cm
+from app.ai.recommendation_engine import SHORT_HAIR, SIDES_KEEP_MAX_CM, TRIM_KEEP_MAX_CM, parse_trim_cm
 
-PROMPT_TEMPLATE_VERSION = "hair-edit-v32-no-beard-words"
+PROMPT_TEMPLATE_VERSION = "hair-edit-v34-trim-top-length"
 
 UNKNOWN = "Unknown"
 # Customer lengths (measured) and catalogue finished lengths on one scale; "Any" is deliberately absent
@@ -11,7 +11,7 @@ LENGTH_ORDER = {"Bald": 0, "Buzz": 1, "Very Short": 1, "Short": 2, "Bob": 2.5, "
 
 # Finished length in words for the side/back prompts (what the camera sees from any angle)
 TARGET_LENGTH_WORDS = {
-    "Bald": "clipped very close to the scalp", "Short": "short", "Bob": "chin length",
+    "Bald": "clipped very close to the scalp", "Buzz": "a buzz cut, clipped to a few millimetres", "Short": "short", "Bob": "chin length",
     "Lob": "just above the shoulders", "Medium": "medium length, around the shoulders",
     "Long": "long, past the shoulders", "Very Long": "very long",
 }
@@ -35,6 +35,48 @@ def _length_change(analysis: Dict[str, Any], style: Dict[str, Any]) -> Optional[
 def _tied_back(analysis: Dict[str, Any]) -> bool:
     """The front photo shows the hair tied back (its real length was seen on the side/back photo)."""
     return bool(analysis.get("hair_tied_back"))
+
+
+def _trim_rule(analysis: Dict[str, Any], style: Dict[str, Any], compact: bool = False) -> str:
+    """
+    The customer's "Hair Cut & Trim Length Preference" as an exact instruction for haircuts. A small trim keeps the
+    overall length (only shape, layers and ends change); a bigger one makes the hair about that much shorter. No
+    choice means any cut: no sentence, the style's own target length decides.
+    """
+    if _service(style) != "Hair":
+        return ""
+    trim_cm = parse_trim_cm(analysis.get("trim_preference"))
+    if trim_cm is None:
+        return ""
+    if trim_cm <= TRIM_KEEP_MAX_CM and _length_change(analysis, style) == "shorter":
+        # A shorter look with a "keep length" trim is only offered when no look fit the trim at all; its own target
+        # length then decides (telling the model both would contradict itself)
+        return ""
+    amount = f"{trim_cm:g} cm"
+    # Short hair: the measured top length makes the instruction concrete (a style description such as "top about
+    # 2-3 cm" must not win over the customer's "keep my length")
+    top = analysis.get("hair_top_cm")
+    short = str(analysis.get("hair_length") or "").strip().lower() in SHORT_HAIR and top
+    top_rule = ""
+    if short:
+        keep_top = max(0.5, round(float(top) - trim_cm, 1))
+        keep_sides = trim_cm <= SIDES_KEEP_MAX_CM
+        top_rule = (f"The hair on top is about {float(top):g} cm long now: keep it about {keep_top:g} cm"
+                    f"{' and keep the sides at their current length' if keep_sides else ''}. " if not compact else
+                    f"Top stays about {keep_top:g} cm{'; sides stay as they are' if keep_sides else ''}. ")
+    override = ("If the style description names a shorter length, keep this length and apply only the style's shape."
+                if not compact else "Ignore any shorter length in the description.")
+    if trim_cm <= TRIM_KEEP_MAX_CM:
+        if compact:
+            return (f"Trim only about {amount}: same overall length as in the photo; change only shape, layers and "
+                    f"ends. {top_rule}{override}")
+        return (f"TRIM: the customer chose to have only about {amount} cut off. The finished hair must be only about "
+                f"{amount} shorter than in the photo: keep the same overall length and change only the shape, layers "
+                f"and ends. Do not cut it shorter than that. {top_rule}{override}")
+    if compact:
+        return f"Cut about {amount} off: the hair ends about {amount} shorter than in the photo, no more."
+    return (f"TRIM: the customer chose to have about {amount} cut off. Make the finished hair about {amount} shorter "
+            "than in the photo, and no shorter than that.")
 
 
 def _untie_sentence(analysis: Dict[str, Any], style: Dict[str, Any]) -> str:
@@ -243,17 +285,17 @@ class ControlledPromptEngine:
         colour_word = colour.lower() + " " if _known(colour) else ""
         is_female = _is_female(analysis, style)
         change = _length_change(analysis, style) if service == "Hair" else None
-        trim_cm = parse_trim_cm(analysis.get("trim_preference"))
 
-        # Length rule: only haircuts change length, and only a cut that keeps the length is told to keep it.
-        # (The app always sends a trim choice, so "keep length" must never override a chosen shorter cut.)
+        # Length rule: only haircuts change length. The customer's trim choice, when there is one, says exactly how
+        # much comes off; without one the style's target length decides (any cut).
         length_rule = ""
         if change == "shorter":
             length_rule = "This is a deliberately shorter haircut: cut the hair to the new length."
         elif service == "Hair" and cust_len in ("medium", "long", "very long"):
             length_rule = "Keep the current hair length; do not cut it shorter."
-            if trim_cm:
-                length_rule += f" Take only about {trim_cm:g} cm off the ends."
+        trim = _trim_rule(analysis, style, compact=True)
+        if trim:
+            length_rule = (length_rule + " " + trim).strip() if change == "shorter" else trim
 
         required = ["Image edit, not text-to-image."]
         if is_female:
@@ -463,10 +505,10 @@ class ControlledPromptEngine:
         elif str(current_len).lower() in ("long", "very long"):
             lines.append(
                 "LENGTH: keep the customer's long hair length from the photo, extending past the shoulders. "
-                "Do not cut it into a bob or anything shorter."
-                + (f" Take only about {trim_cm:g} cm off the ends." if trim_cm else ""))
-        elif change == "same" and trim_cm:
-            lines.append(f"LENGTH: keep the current length class; take only about {trim_cm:g} cm off the ends.")
+                "Do not cut it into a bob or anything shorter.")
+        trim = _trim_rule(analysis, style)
+        if trim:
+            lines.append(trim)
         if change in ("shorter", "same") or (trim_cm is not None and trim_cm <= 5.0) or (change is None and str(current_len).lower() in ("medium", "long", "very long")):
             lines.append("Do not make the hair longer than it currently is.")
         if not _known(current_len):
@@ -508,6 +550,9 @@ class ControlledPromptEngine:
                     f"do not make it longer or shorter." if words else
                     "The finished length is exactly as in the front preview.")
             look += f" Same natural {colour_str}colour and {texture_str}texture as the front."
+            trim = _trim_rule(analysis, style, compact=compact)
+            if trim:
+                look += " " + trim
             curls = _curl_rule(texture, compact=compact)
             if curls:
                 look += " " + curls

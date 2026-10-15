@@ -1,6 +1,7 @@
 """Hair length through recommendations and edit prompts: shorter cuts, trims, side/back views, buzz vs bald."""
 import numpy as np
 import pytest
+from app.core.config import settings
 
 from app.ai.face_analysis import FaceAnalyzer
 from app.ai.prompt_engine import prompt_engine
@@ -49,8 +50,8 @@ def test_trim_parsing():
 
 def test_trim_directive_only_when_the_cut_keeps_the_length():
     trim = dict(LONG_WOMAN, trim_preference="5cm")
-    assert "about 5 cm off the ends" in prompt_engine.build_prompt(trim, get_style(LONG_LAYERS))
-    assert "off the ends" not in prompt_engine.build_prompt(trim, get_style(BOB))
+    assert "only about 5 cm cut off" in prompt_engine.build_prompt(trim, get_style(LONG_LAYERS))
+    assert "TRIM:" not in prompt_engine.build_prompt(trim, get_style(BOB))  # a shorter look keeps its own length
     # a short-haired man getting a buzz cut is never told to "maintain long hair"
     buzz = prompt_engine.build_prompt(dict(SHORT_MAN, trim_preference="0 - 1 cm micro-trim"), get_style(BUZZ))
     assert "long hair" not in buzz.lower() and "TRIM DIRECTIVE" not in buzz
@@ -74,7 +75,7 @@ def test_bigger_trims_open_shorter_looks():
 def test_trim_does_not_restrict_short_hair():
     looks = recommendation_engine.recommend("Oval", "Short", "Medium", gender="Men", target_service_type="Hair",
                                             style_category="Trendy", trim_preference="0 - 1 cm micro-trim")
-    assert len(looks) == 4
+    assert settings.STYLE_RECOMMENDATION_MIN <= len(looks) <= settings.STYLE_RECOMMENDATION_COUNT
 
 
 # ---------------------------------------------------------------- braids are not offered
@@ -144,7 +145,7 @@ def test_dark_scalp_is_buzz_and_bare_scalp_is_bald():
     assert scalp_hair(_head(205), covered, _face())[0] == "Buzz"
     assert not is_bald("Buzz", "Unknown")
     looks = recommendation_engine.recommend("Oval", "Buzz", "Unknown", gender="Men", target_service_type="Hair")
-    assert len(looks) == 4                                         # a buzz cut keeps haircuts
+    assert settings.STYLE_RECOMMENDATION_MIN <= len(looks) <= settings.STYLE_RECOMMENDATION_COUNT  # a buzz cut keeps haircuts
 
 
 # ---------------------------------------------------------------- side/back photos and measured length

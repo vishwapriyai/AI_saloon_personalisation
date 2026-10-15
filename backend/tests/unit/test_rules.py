@@ -6,7 +6,7 @@ from app.ai.recommendation_engine import is_bald, parse_services, recommendation
 from app.analytics.capacity_analytics import CapacityAnalyticsEngine
 from app.analytics.discount_optimizer import AutomaticDiscountEngine
 from app.core import security
-from app.core.config import Settings, check_settings
+from app.core.config import Settings, check_settings, settings
 
 
 # ---------------------------------------------------------------- services and recommendations
@@ -44,7 +44,8 @@ def test_slots_are_shared_between_services():
                                             target_service_type="Hair, Beard", style_category="Trendy",
                                             beard_style="Full Beard")
     services = [s["service"] for s in looks]
-    assert services.count("Hair") == 2 and services.count("Beard") == 2
+    assert settings.STYLE_RECOMMENDATION_MIN <= len(looks) <= settings.STYLE_RECOMMENDATION_COUNT
+    assert abs(services.count("Hair") - services.count("Beard")) <= 1  # slots alternate between the services
 
 
 # ---------------------------------------------------------------- customer type

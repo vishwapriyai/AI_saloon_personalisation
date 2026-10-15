@@ -109,7 +109,8 @@ class Settings(BaseSettings):
     HF_TOKEN: str = ""
     HF_SPACE_STEPS: int = 4
     # Number of recommended styles (and therefore personalized previews generated) per customer
-    STYLE_RECOMMENDATION_COUNT: int = 4
+    STYLE_RECOMMENDATION_COUNT: int = 8   # most looks (preview cards) per recommendation: only looks that suit
+    STYLE_RECOMMENDATION_MIN: int = 4     # fewest looks: other achievable looks fill up to this when few suit
     MAX_PARALLEL_GENERATIONS: int = 4
     # Free shared GPUs can take 1-2 minutes per image when busy, so allow slow answers before retrying.
     # Keep PROVIDER_REQUEST_TIMEOUT_SECONDS x PROVIDER_REQUEST_RETRIES below GENERATION_TIMEOUT_SECONDS (checked
@@ -117,6 +118,12 @@ class Settings(BaseSettings):
     GENERATION_TIMEOUT_SECONDS: int = 120          # one edit attempt, including provider retries (semaphore wait excluded)
     PROVIDER_REQUEST_TIMEOUT_SECONDS: int = 45     # one HTTP request to the image provider
     PROVIDER_REQUEST_RETRIES: int = 2              # tries per attempt when the provider hangs or has a transient error
+    # Gemini / Vertex AI: temporary errors (429 too many requests, 500/503, no image in the answer) are retried on
+    # Gemini with these waits before the fallback provider is used, within GEMINI_RETRY_BUDGET_SECONDS
+    GEMINI_MAX_REQUESTS: int = 4
+    GEMINI_RETRY_WAITS_SECONDS: list[float] = [4.0, 10.0, 20.0]
+    GEMINI_RETRY_BUDGET_SECONDS: int = 95
+    IMAGE_LOG_FILE: str = "logs/image_generation.log"  # every provider error and fallback, relative to backend/
     # Optional second provider tried when the main one is unavailable (e.g. "huggingface"); empty = none
     IMAGE_EDIT_FALLBACK_PROVIDER: str = ""
     # Use the fallback provider for the last attempt after the main provider's preview failed validation. Off: the
@@ -158,6 +165,9 @@ def check_settings(s: "Settings") -> list[str]:
     if s.PROVIDER_REQUEST_TIMEOUT_SECONDS * s.PROVIDER_REQUEST_RETRIES >= s.GENERATION_TIMEOUT_SECONDS:
         problems.append("PROVIDER_REQUEST_TIMEOUT_SECONDS x PROVIDER_REQUEST_RETRIES must be below "
                         "GENERATION_TIMEOUT_SECONDS, or the provider's last try is cut off.")
+    if s.GEMINI_RETRY_BUDGET_SECONDS >= s.GENERATION_TIMEOUT_SECONDS:
+        problems.append("GEMINI_RETRY_BUDGET_SECONDS must be below GENERATION_TIMEOUT_SECONDS, or Gemini's retries "
+                        "are cut off by the attempt timeout.")
     if s.is_production:
         if s.SECRET_KEY == DEFAULT_SECRET_KEY or len(s.SECRET_KEY) < 32:
             problems.append("Set a random SECRET_KEY of at least 32 characters.")

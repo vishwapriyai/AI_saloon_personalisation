@@ -14,6 +14,7 @@ os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(_tmp, "test.db").replac
 os.environ["STORAGE_LOCAL_DIR"] = os.path.join(_tmp, "media")
 os.environ["APP_ENV"] = "development"
 os.environ["GEMINI_API_KEY"] = ""
+os.environ["IMAGE_LOG_FILE"] = os.path.join(_tmp, "image_generation.log")  # keep test runs out of the real log
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 

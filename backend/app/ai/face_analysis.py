@@ -7,7 +7,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.ai.vision_models import (
     LM_CHEEK_SKIN, LM_CHIN, LM_FOREHEAD_CENTER, LM_LOWER_FACE, UNKNOWN, face_shape, get_vision_models, hair_colour_name,
-    hair_lab, hair_length, hair_texture, scalp_hair,
+    hair_lab, hair_length, hair_texture, hair_top_cm, scalp_hair,
 )
 
 logger = logging.getLogger(__name__)
@@ -251,6 +251,7 @@ class FaceAnalyzer:
             "hair_length": length,
             "hair_length_confidence": round(length_conf, 2),
             "hair_length_cut_off_by_frame": hair_cut_off_by_frame and length in ("Short", "Medium", "Long"),
+            "hair_top_cm": hair_top_cm(mask, face) if hair_visible else 0.0,
             # Bald vs buzz cannot be certain from one photo (light hair on light skin): ask for confirmation
             "hair_length_needs_confirmation": length in ("Bald", "Buzz"),
             "hairline": hairline,
@@ -438,6 +439,7 @@ class FaceAnalyzer:
             "hair_density": "Sparse / Bald" if detected_len == "Bald" else detected_density,
             "hair_type": hair_type,
             "hair_length": detected_len,
+            "hair_top_cm": front.get("hair_top_cm"),
             "hair_length_needs_confirmation": (bool(front.get("hair_length_needs_confirmation")) or detected_len != front_len
                                                or head_covered or back_suggests_longer),
             # Read by the edit prompts: show tied-back hair let down (only when it really is tied back)

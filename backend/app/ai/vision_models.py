@@ -301,6 +301,26 @@ def hair_texture(rgb: np.ndarray, mask: np.ndarray, face_width: float) -> tuple[
     return UNKNOWN, 0.0
 
 
+# Top length: how far the hair rises above the skull over the forehead. The forehead landmark sits ~0.34 face
+# heights below the top of a bald skull (measured on bald customers); hair height above that, in cm (face height
+# ~18 cm), times a factor for hair that lies at an angle rather than straight up (calibrated on a photo with
+# ~8 cm of hair on top). An estimate for choosing looks, not a measurement for the stylist.
+SKULL_DOME_FACE_HEIGHTS = 0.34
+FACE_HEIGHT_CM = 18.0
+TOP_LENGTH_FACTOR = 1.6
+
+
+def hair_top_cm(mask: np.ndarray, face: FaceGeometry) -> Optional[float]:
+    """Estimated length of the hair on top of the head in cm; None when no hair is found above the forehead."""
+    x0 = int(max(0, face.center_x - 0.25 * face.width))
+    x1 = int(min(mask.shape[1], face.center_x + 0.25 * face.width))
+    rows = np.nonzero(mask[:, x0:x1].any(axis=1))[0]
+    if not rows.size or rows.min() >= face.top_y:
+        return None
+    above = (face.top_y - rows.min()) / face.height - SKULL_DOME_FACE_HEIGHTS
+    return round(max(0.0, above * FACE_HEIGHT_CM * TOP_LENGTH_FACTOR), 1)
+
+
 def hair_length(mask: np.ndarray, face: FaceGeometry) -> tuple[str, float]:
     """Length from where the visible hair ends relative to the chin, in face heights."""
     fh = face.height

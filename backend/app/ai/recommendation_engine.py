@@ -51,13 +51,16 @@ def parse_trim_cm(trim_preference: Optional[str]) -> Optional[float]:
     if not numbers:
         return None
     cm = max(numbers)
-    cm = cm / 10.0 if "mm" in text and "cm" not in text else cm
+    if "mm" in text and "cm" not in text:
+        cm = cm / 10.0
+    elif re.search(r"\d\s*(inch|inches|in|\")", text):
+        cm = cm * 2.54
     # "0cm" means keep the length (a micro-trim). Decimals such as "5.0 cm" are read as written.
     return cm if cm > 0 else 1.0
 
 
 def allowed_length_drop(trim_cm: Optional[float]) -> Optional[float]:
-    """Length classes a long-haired customer's chosen trim allows the look to drop; None = no limit."""
+    """Length classes the customer's chosen trim allows the look to drop; None = no limit (no choice = any cut)."""
     if trim_cm is None:
         return None
     if trim_cm <= TRIM_KEEP_MAX_CM:
@@ -78,10 +81,37 @@ def length_drop(current_length: Optional[str], style: Dict[str, Any]) -> Optiona
     return min(cur, CATALOGUE_MAX_LENGTH_RANK) - target
 
 
-def trim_allows(style: Dict[str, Any], hair_length: Optional[str], trim_preference: Optional[str]) -> bool:
-    """False when a customer's trim choice rules this haircut out (e.g. "keep length" vs a bob or medium cut)."""
-    if style.get("service", "Hair") != "Hair" or (hair_length or "").strip().lower() not in LONG_HAIR:
+SHORT_HAIR = ("buzz", "very short", "short")
+TOP_TRIM_TOLERANCE_CM = 1.5    # a cut may take this much more off the top than the chosen trim (estimate noise)
+TOP_GROWTH_TOLERANCE_CM = 2.0  # a cut needs growth when its top is longer than the customer's by more than this
+SIDES_KEEP_MAX_CM = 2.0        # trims up to this keep the sides too: no skin fades or undercuts
+
+
+def top_removal_cm(style: Dict[str, Any], hair_length: Optional[str], hair_top_cm: Optional[float]) -> Optional[float]:
+    """
+    Centimetres the cut takes off the top of short hair (negative: the cut needs a longer top). Short hair is judged
+    by its top length because the length classes are too coarse there; None when it does not apply or is unknown.
+    """
+    if (hair_length or "").strip().lower() not in SHORT_HAIR or hair_top_cm is None or style.get("top_cm") is None:
+        return None
+    return float(hair_top_cm) - float(style["top_cm"])
+
+
+def trim_allows(style: Dict[str, Any], hair_length: Optional[str], trim_preference: Optional[str],
+                hair_top_cm: Optional[float] = None) -> bool:
+    """False when a customer's trim choice rules this haircut out (e.g. "keep length" vs a bob, or a 1 cm trim vs a
+    Caesar cut on 8 cm of hair). Applies to every hair length; no trim choice allows any cut."""
+    if style.get("service", "Hair") != "Hair":
         return True
+    trim_cm = parse_trim_cm(trim_preference)
+    if trim_cm is not None and trim_cm <= SIDES_KEEP_MAX_CM and style.get("sides_to_skin"):
+        return False  # "keep length" / a slight trim never fades the sides down to the skin
+    removal = top_removal_cm(style, hair_length, hair_top_cm)
+    if trim_cm is not None and removal is not None:
+        return removal <= trim_cm + TOP_TRIM_TOLERANCE_CM
+    current = (hair_length or "").strip().lower()
+    if current in ("buzz", "very short") and str(style.get("hair_length", "")).strip().lower() == "bald":
+        return True  # shaving a few millimetres of buzz-cut hair fits even the smallest trim
     allowed = allowed_length_drop(parse_trim_cm(trim_preference))
     drop = length_drop(hair_length, style)
     return allowed is None or drop is None or drop <= allowed
@@ -290,7 +320,7 @@ class HairstyleRecommendationEngine:
                hair_type: Optional[str], beard_style: Optional[str], user_gender: str,
                style_category: str, expert_rules: Dict[str, str],
                growth_map: Optional[Dict[str, Any]] = None,
-               trim_preference: Optional[str] = None) -> Dict[str, Any]:
+               trim_preference: Optional[str] = None, hair_top_cm: Optional[float] = None) -> Dict[str, Any]:
         service = style.get("service", "Hair")
         score = 0.0
         style_gender = style.get("gender", "Unisex").lower()
@@ -330,16 +360,17 @@ class HairstyleRecommendationEngine:
             style_families = {code[:1] for code in style.get("hair_types", [])}
             if texture_family and style_families:
                 score += 15.0 if texture_family in style_families else -40.0
-            # Trim preference (long hair): looks the trim rules out are filtered before scoring; among the
-            # rest, a bigger trim favours the shorter looks it allows, "keep length" favours keeping the length
-            if (hair_length or "").strip().lower() in LONG_HAIR:
-                allowed = allowed_length_drop(parse_trim_cm(trim_preference))
-                drop = length_drop(hair_length, style)
-                if drop is not None:
-                    if allowed is not None:
-                        score += 40.0 if drop == allowed else (20.0 if 0 <= drop < allowed else 0.0)
-                    elif drop >= 1:
-                        score += 100.0 if drop >= 1.5 else 40.0
+            # Trim preference: looks the trim rules out are filtered before scoring; among the rest, a bigger
+            # trim favours the shorter looks it allows, "keep length" favours keeping the length. No trim choice
+            # means any cut: no length preference at all.
+            trim_cm = parse_trim_cm(trim_preference)
+            drop = length_drop(hair_length, style)
+            if trim_cm is not None and drop is not None:
+                allowed = allowed_length_drop(trim_cm)
+                if allowed is not None:
+                    score += 40.0 if drop == allowed else (20.0 if 0 <= drop < allowed else 0.0)
+                elif drop >= 1:
+                    score += 100.0 if drop >= 1.5 else 40.0
 
         # 4. Feasibility
         feasibility_status, feasibility_warning, feasibility_score = "Achievable Today", None, 100.0
@@ -357,11 +388,19 @@ class HairstyleRecommendationEngine:
                     feasibility_status = "Not Applicable (Bald / Clean Shaved Scalp)"
                     feasibility_warning = ("We don't have hair-based haircut service for you because your photo analysis shows a bald / clean shaved scalp. "
                                            "Please choose Beard & Grooming or Scalp Care service instead, as haircut services are only for customers with hair.")
-            elif target_length == "bald":
+            elif target_length == "bald" and current_length not in ("buzz", "very short"):
                 score -= 800.0
                 feasibility_score = 0.0
                 feasibility_status = "Not Recommended (Customer Has Full Hair)"
                 feasibility_warning = "Clean shaved scalp is only for customers with bald scalps or requesting a full head shave."
+            elif top_removal_cm(style, hair_length, hair_top_cm) is not None:
+                # Short hair: judged by the measured top length (a 6-7 cm side part is "Medium" but fits 8 cm of hair)
+                if top_removal_cm(style, hair_length, hair_top_cm) < -TOP_GROWTH_TOLERANCE_CM:
+                    score -= 60.0
+                    feasibility_score = 60.0
+                    feasibility_status = "Needs Extensions / Growth"
+                    feasibility_warning = ("Based on your current hair length, this style needs more length on top "
+                                           "than you have today. We recommend a shorter alternative.")
             elif current_length in LENGTH_RANK and target_length in LENGTH_RANK \
                     and LENGTH_RANK[target_length] > LENGTH_RANK[current_length]:
                 score -= 60.0
@@ -437,18 +476,14 @@ class HairstyleRecommendationEngine:
         return True
 
     @staticmethod
-    def _texture_matches(styles: List[Dict[str, Any]], hair_type: Optional[str]) -> List[Dict[str, Any]]:
+    def _fits_texture(style: Dict[str, Any], hair_type: Optional[str]) -> bool:
         """
-        Haircuts made for the customer's texture, when there are enough of them to fill the page. A haircut keeps
-        the texture: offering a sleek blow-dried look to curly hair (or a curly shag to straight hair) shows a
-        result the cut cannot give, and the edit model changes the hair's structure to match the description.
-        Styles without texture tags count as matching.
+        The haircut is made for the customer's texture. A haircut keeps the texture: a sleek blow-dried look on
+        curly hair (or a curly shag on straight hair) shows a result the cut cannot give, and the edit model
+        changes the hair's structure to match the description. Unknown texture or untagged styles count as fitting.
         """
         family = TEXTURE_FAMILY.get((hair_type or "").strip().lower())
-        if not family:
-            return styles
-        matching = [s for s in styles if not s.get("hair_types") or family in {c[:1] for c in s["hair_types"]}]
-        return matching if len(matching) >= settings.STYLE_RECOMMENDATION_COUNT else styles
+        return not family or not style.get("hair_types") or family in {c[:1] for c in style["hair_types"]}
 
     def recommend(
         self,
@@ -462,6 +497,7 @@ class HairstyleRecommendationEngine:
         beard_style: Optional[str] = None,
         growth_map: Optional[Dict[str, Any]] = None,
         trim_preference: Optional[str] = None,
+        hair_top_cm: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         face_shape = FACE_SHAPE_ALIASES.get(face_shape, face_shape)
         user_gender = (gender or "Women").lower()
@@ -472,6 +508,8 @@ class HairstyleRecommendationEngine:
 
         # Rank each picked service's styles: chosen category first, best score first, other collection dropped
         ranked: Dict[str, List[Dict[str, Any]]] = {}
+        best: Dict[str, List[Dict[str, Any]]] = {}
+        backup: Dict[str, List[Dict[str, Any]]] = {}
         for service in services:
             # Eligibility before scoring: the right service and collection, no braided updos (they are styling,
             # not haircuts, and are not offered), and nothing the customer's trim choice rules out. If the trim
@@ -479,7 +517,7 @@ class HairstyleRecommendationEngine:
             candidates = [style for style in ALL_STYLES
                           if style.get("service", "Hair") == service and self._in_collection(style, user_gender)
                           and not style.get("is_braid_styling")]
-            trimmed = [style for style in candidates if trim_allows(style, hair_length, trim_preference)]
+            trimmed = [style for style in candidates if trim_allows(style, hair_length, trim_preference, hair_top_cm)]
             if not trimmed and candidates:
                 # Nothing fits the trim exactly: keep the looks closest to the customer's length rather than
                 # dropping the trim choice (which used to put bobs in front of a "keep my length" customer)
@@ -488,14 +526,26 @@ class HairstyleRecommendationEngine:
                 if known:
                     closest = min(known)
                     trimmed = [st for st in candidates if drops[id(st)] is None or drops[id(st)] <= closest]
+            # Fewer looks fit the trim than the page needs: the cuts that take the least extra off fill in. They rank
+            # after every look that fits the trim, and their previews still keep the customer's length (the prompt
+            # applies only the style's shape).
+            fill_ids: set = set()
+            usable_fits = [st for st in trimmed if not (service == "Hair" and self._texture_clash(st, hair_type))]
+            if trimmed and len(usable_fits) < settings.STYLE_RECOMMENDATION_MIN:
+                def extra_cut(st: Dict[str, Any]) -> float:
+                    top = top_removal_cm(st, hair_length, hair_top_cm)
+                    drop = length_drop(hair_length, st)
+                    return top if top is not None else (drop * 10.0 if drop is not None else 99.0)
+                rest = sorted((st for st in candidates if st not in trimmed), key=lambda st: max(0.0, extra_cut(st)))
+                fill = rest[:settings.STYLE_RECOMMENDATION_MIN * 2]
+                fill_ids = {st["id"] for st in fill}
+                trimmed = trimmed + fill
             pool = trimmed or candidates
-            if service == "Hair":
-                pool = self._texture_matches(pool, hair_type)
             scored = [
                 self._score(style, face_shape=face_shape, hair_length=hair_length, hair_density=hair_density,
                             hair_type=hair_type, beard_style=beard_style, user_gender=user_gender,
                             style_category=style_category, expert_rules=expert_rules, growth_map=growth_map,
-                            trim_preference=trim_preference)
+                            trim_preference=trim_preference, hair_top_cm=hair_top_cm)
                 for style in pool
             ]
             scored.sort(key=lambda x: x["score"], reverse=True)
@@ -506,24 +556,58 @@ class HairstyleRecommendationEngine:
                 ranked[service] = usable
             else:
                 ranked[service] = in_category + [s for s in usable if s.get("category", "").lower() != wanted]
+            if service == "Hair":
+                # Looks made for the customer's texture come first (from any category)
+                ranked[service] = ([s for s in ranked[service] if self._fits_texture(s, hair_type)]
+                                   + [s for s in ranked[service] if not self._fits_texture(s, hair_type)])
+            # Only looks the customer's hair can have today are offered (no "needs growth / extensions" cards).
+            # The best ones also suit the face shape and the hair texture; the rest are kept only as backup.
+            achievable = [s for s in ranked[service] if s.get("feasible", True)]
+            fits = [s for s in achievable if s["id"] not in fill_ids]
+            best[service] = [s for s in fits if self._suits(s, service, face_shape, hair_type)]
+            # Backup order: no texture clash (a coily afro never fills in for wavy hair), then the customer's trim
+            # choice (looks that fit it before the closest fills), then the closer texture
+            spare = ([s for s in fits if not self._suits(s, service, face_shape, hair_type)]
+                     + [s for s in achievable if s["id"] in fill_ids])
+            backup[service] = sorted(spare, key=lambda s: (
+                service == "Hair" and self._texture_clash(s, hair_type), s["id"] in fill_ids,
+                service == "Hair" and not self._fits_texture(s, hair_type)))
 
-        # Share the slots across the picked services, one at a time in the order picked
-        count = settings.STYLE_RECOMMENDATION_COUNT
+        # Up to STYLE_RECOMMENDATION_COUNT looks that suit the customer; only when fewer than
+        # STYLE_RECOMMENDATION_MIN suit, other achievable looks fill up to the minimum
+        result = self._share_slots(services, best, settings.STYLE_RECOMMENDATION_COUNT)
+        if len(result) < settings.STYLE_RECOMMENDATION_MIN:
+            result += self._share_slots(services, backup, settings.STYLE_RECOMMENDATION_MIN - len(result))
+        return result
+
+    @staticmethod
+    def _texture_clash(style: Dict[str, Any], hair_type: Optional[str]) -> bool:
+        """The cut only works for the opposite texture: curly/coily-only cuts on straight or wavy hair, or
+        straight-only cuts on curly or coily hair."""
+        family = TEXTURE_FAMILY.get((hair_type or "").strip().lower())
+        families = {c[:1] for c in style.get("hair_types", [])}
+        if not family or not families:
+            return False
+        return families <= {"3", "4"} if family in ("1", "2") else (families <= {"1"} if family in ("3", "4") else False)
+
+    def _suits(self, style: Dict[str, Any], service: str, face_shape: str, hair_type: Optional[str]) -> bool:
+        """Suits the measured face shape (unless unknown; colour/texture keep the cut) and the hair texture."""
+        face_ok = (service in ("Colour", "Texture") or face_shape in ("Unknown", "", None)
+                   or style.get("expert_analysis", {}).get("face_shape_matched", True))
+        return bool(face_ok) and (service != "Hair" or self._fits_texture(style, hair_type))
+
+    @staticmethod
+    def _share_slots(services: List[str], lists: Dict[str, List[Dict[str, Any]]], count: int) -> List[Dict[str, Any]]:
+        """Up to `count` looks, taken one per service in turn in the order the services were picked."""
         result: List[Dict[str, Any]] = []
         positions = {service: 0 for service in services}
-        while len(result) < count and any(positions[s] < len(ranked[s]) for s in services):
+        while len(result) < count and any(positions[s] < len(lists[s]) for s in services):
             for service in services:
                 if len(result) >= count:
                     break
-                if positions[service] < len(ranked[service]):
-                    result.append(ranked[service][positions[service]])
+                if positions[service] < len(lists[service]):
+                    result.append(lists[service][positions[service]])
                     positions[service] += 1
-        # A look that is not achievable today names the best achievable look of the same service instead
-        for style in result:
-            if not style.get("feasible", True):
-                service = style.get("service", "Hair")
-                alt = next((s for s in ranked.get(service, []) if s.get("feasible", True) and s["id"] != style["id"]), None)
-                style["suggested_alternative"] = {"id": alt["id"], "name": alt["name"]} if alt else None
         return result
 
 

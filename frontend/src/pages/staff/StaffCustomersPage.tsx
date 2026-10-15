@@ -232,19 +232,20 @@ export const StaffCustomersPage: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {customers.map((c) => (
             <button key={c.id} type="button" onClick={() => setSelected(c)}
-              className="text-left p-4 rounded-2xl bg-slate-900/80 hover:bg-slate-900 border border-slate-700/70 hover:border-amber-500/60 transition-all flex items-center justify-between gap-3">
-              <div className="min-w-0 flex-1 space-y-2">
-                <CustomerSummaryCard customer={c} />
-                <p className="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-2">
-                  {c.home_branch ? <span>Home branch: <b className="text-slate-300">{c.home_branch}</b></span>
-                    : <span className="font-semibold text-amber-300">New — no branch yet</span>}
-                  {scopeBranch && c.visits_at_branch ? <span>• {c.visits_at_branch} {c.visits_at_branch === 1 ? 'visit' : 'visits'} here</span> : null}
-                </p>
-                {c.matched_by_phone && (
-                  <p className="text-xs text-emerald-400 flex items-center space-x-1"><Phone className="w-3 h-3" /><span>Matched mobile number</span></p>
-                )}
-              </div>
-              <ChevronRight className="w-5 h-5 text-amber-400 flex-shrink-0" />
+              className="relative h-full text-left p-4 pr-10 rounded-2xl bg-slate-900/80 hover:bg-slate-900 border border-slate-700/70 hover:border-amber-500/60 transition-all flex flex-col">
+              <ChevronRight className="absolute top-5 right-3 w-5 h-5 text-amber-400" />
+              <CustomerSummaryCard customer={c} footer={
+                <div className="space-y-1">
+                  <p className="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-2">
+                    {c.home_branch ? <span>Home branch: <b className="text-slate-300">{c.home_branch}</b></span>
+                      : <span className="font-semibold text-amber-300">New — no branch yet</span>}
+                    {scopeBranch && c.visits_at_branch ? <span>• {c.visits_at_branch} {c.visits_at_branch === 1 ? 'visit' : 'visits'} here</span> : null}
+                  </p>
+                  {c.matched_by_phone && (
+                    <p className="text-xs text-emerald-400 flex items-center gap-1"><Phone className="w-3 h-3" /><span>Matched mobile number</span></p>
+                  )}
+                </div>
+              } />
             </button>
           ))}
         </div>

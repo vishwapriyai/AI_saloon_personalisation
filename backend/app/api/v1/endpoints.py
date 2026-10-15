@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import timedelta
+import logging
 import os
 import uuid
 
@@ -48,6 +49,7 @@ from app.analytics.discount_optimizer import discount_engine
 from app.campaigns.campaign_manager import campaign_loyalty_engine
 from app.integrations.notifications import whatsapp_provider
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # -------------------------------------------------------------
@@ -1029,7 +1031,8 @@ def get_style_recommendations(payload: RecommendationRequest, db: Session = Depe
         style_category=payload.style_category,
         beard_style=feat_beard,
         growth_map=growth_map,
-        trim_preference=payload.trim_preference,
+        trim_preference=_clean_trim(payload.trim_preference),
+        hair_top_cm=_hair_top_cm(db, photo),
     )
 
     style_ids = [s["id"] for s in top_styles]
@@ -1038,6 +1041,7 @@ def get_style_recommendations(payload: RecommendationRequest, db: Session = Depe
         photo_id=payload.photo_id,
         target_service_type=payload.target_service_type,
         style_category=payload.style_category,
+        trim_preference=_clean_trim(payload.trim_preference),
         recommended_style_ids_json=style_ids
     )
     db.add(rec_record)
@@ -1103,8 +1107,7 @@ async def generate_personalized_images(payload: GenerationRequest, db: Session =
     analysis.setdefault("face_shape", photo.face_shape)
     analysis.setdefault("hair_length", photo.hair_length)
     analysis.setdefault("hair_density", photo.hair_density)
-    if payload.trim_preference:
-        analysis["trim_preference"] = payload.trim_preference
+    _apply_trim(analysis, rec, payload.trim_preference)
 
     # Only looks recommended for this photo session can be previewed. Unknown ids are an error: never fall
     # back to a different style (that would preview the wrong look).
@@ -1204,6 +1207,7 @@ async def generate_high_fidelity_selection(
     analysis = _analysis_for_generation(db, photo)
     analysis.setdefault("face_shape", photo.face_shape)
     analysis.setdefault("hair_length", photo.hair_length)
+    _apply_trim(analysis, rec, None)
     photo_url = photo.original_image_url
     db.commit()
 
@@ -1271,6 +1275,44 @@ def get_generation_job_status(job_id: str, db: Session = Depends(get_db), princi
 # -------------------------------------------------------------
 # 5. Customer Selection & Haircut Instructions
 # -------------------------------------------------------------
+def _hair_top_cm(db: Session, photo: CustomerPhoto) -> Optional[float]:
+    """Measured length of the hair on top (cm), used to match short cuts to the trim choice. Photos analysed before
+    this was measured get it from their stored front photo once; None when it cannot be measured."""
+    features = dict(photo.facial_features_json or {})
+    if "hair_top_cm" in features:
+        return features["hair_top_cm"]
+    value = None
+    try:
+        path = os.path.join(storage_service.base_dir, *media_path(photo.original_image_url)[len("/static/media/"):].split("/"))
+        with open(path, "rb") as f:
+            value = face_analyzer.analyze_front_photo(f.read()).get("hair_top_cm")
+    except Exception as e:  # an unreadable old photo only loses this refinement
+        logger.warning("Could not measure hair top length for photo %s: %s", photo.id, e)
+        return None
+    features["hair_top_cm"] = value
+    photo.facial_features_json = features
+    db.commit()
+    return value
+
+
+def _clean_trim(trim: Optional[str]) -> Optional[str]:
+    """The trim choice as stored; empty or "any" means no choice (any cut)."""
+    value = (trim or "").strip()
+    return None if not value or value.lower() in ("any", "none", "no preference") else value[:50]
+
+
+def _apply_trim(analysis: dict, rec: Optional[StyleRecommendation], requested: Optional[str]) -> None:
+    """
+    The customer's trim choice for the edit prompts and validation: the one sent with the request, else the one
+    the looks were recommended for. No choice anywhere = any cut (the key is removed, so nothing limits length).
+    """
+    trim = _clean_trim(requested) or _clean_trim(getattr(rec, "trim_preference", None))
+    if trim:
+        analysis["trim_preference"] = trim
+    else:
+        analysis.pop("trim_preference", None)
+
+
 def _analysis_for_generation(db: Session, photo: CustomerPhoto) -> dict:
     """
     The photo analysis used to build edit prompts. The collection the customer last chose (Men / Women, saved on
@@ -1510,6 +1552,9 @@ async def generate_selection_views(selection_id: int, db: Session = Depends(get_
     analysis = _analysis_for_generation(db, photo)
     if selection.reference_image_url:
         analysis["front_preview_url"] = selection.reference_image_url
+    view_rec = (db.query(StyleRecommendation).filter(StyleRecommendation.id == selection.recommendation_id).first()
+                if selection.recommendation_id else None)
+    _apply_trim(analysis, view_rec, None)
     existing = {p.view for p in db.query(ServicePhoto).filter(ServicePhoto.selection_id == selection.id,
                                                               ServicePhoto.stage == "ai").all()}
     sources = {

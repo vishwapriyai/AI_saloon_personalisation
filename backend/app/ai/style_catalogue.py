@@ -71,7 +71,7 @@ HAIRSTYLE_CATALOGUE = [
         "category": "Professional",
         "face_shapes": ["Oval", "Square"],
         "hair_types": ["1A", "1B", "2A", "3A", "4A"],
-        "hair_length": "Short",
+        "hair_length": "Buzz",
         "hair_density": "Fine",
         "recommended_hair_densities": ["Fine", "Medium", "Thick"],
         "maintenance_level": "Low",
@@ -1323,6 +1323,21 @@ for _style in BEARD_CATALOGUE:
 
 for _style in HAIRSTYLE_CATALOGUE + BEARD_CATALOGUE:
     _style.setdefault("edit_description", EDIT_DESCRIPTIONS.get(_style["id"], _style["description"]))
+
+# Finished length of the hair on TOP of the head (cm) for cuts defined by it (short and medium men's / unisex cuts,
+# the pixie, shaved looks). With the customer's measured top length it decides whether a cut fits their trim
+# choice and whether it needs growth: "Short" and "Medium" classes are too coarse for short hair (a 2 cm Caesar
+# and a 5 cm textured top are both "Short"). Long cuts are judged by where the hair ends instead.
+TOP_LENGTH_CM = {
+    1: 5.0, 2: 6.5, 3: 7.0, 4: 0.5, 9: 7.0, 12: 5.0, 16: 11.0, 17: 4.5, 18: 9.0, 19: 7.0, 20: 8.0,
+    21: 3.0, 22: 4.5, 23: 4.0, 24: 4.5, 25: 5.0, 26: 2.5, 27: 4.0, 34: 0.0, 35: 0.2, 36: 0.0, 37: 0.0,
+}
+# Cuts that clip or fade the sides down to (almost) the skin: they take far more than a small trim off the sides
+SIDES_TO_SKIN = {1, 3, 16, 17, 18, 19, 27}
+for _style in HAIRSTYLE_CATALOGUE:
+    if _style["id"] in TOP_LENGTH_CM:
+        _style.setdefault("top_cm", TOP_LENGTH_CM[_style["id"]])
+    _style.setdefault("sides_to_skin", _style["id"] in SIDES_TO_SKIN)
 
 ALL_STYLES = HAIRSTYLE_CATALOGUE + BEARD_CATALOGUE
 STYLES_BY_ID = {style["id"]: style for style in ALL_STYLES}

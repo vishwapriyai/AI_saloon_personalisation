@@ -219,6 +219,9 @@ class StyleRecommendation(Base):
     photo_id: Mapped[int] = mapped_column(ForeignKey("customer_photos.id"))
     target_service_type: Mapped[str] = mapped_column(String(255))  # several services, e.g. "Hair, Beard, Colour / Balayage"
     style_category: Mapped[str] = mapped_column(String(50))
+    # The customer's "Hair Cut & Trim Length Preference" (e.g. "0 - 1 cm micro-trim", "5cm"); None = any cut.
+    # Kept here so every preview of these looks (front, side, back, final) follows the same choice.
+    trim_preference: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     recommended_style_ids_json: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

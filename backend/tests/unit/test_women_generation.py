@@ -8,6 +8,7 @@ from app.ai.image_editing import GeminiEditor, HairStyleGenerator
 from app.ai.prompt_engine import prompt_engine
 from app.ai.recommendation_engine import parse_trim_cm, recommendation_engine
 from app.ai.style_catalogue import ALL_STYLES, get_style
+from app.core.config import settings
 
 WOMAN = {"gender": "Women", "hair_color_detected": "Black", "hair_density": "Thick", "hair_type": "Unknown",
          "beard_style_current": "Clean Shaven"}
@@ -112,7 +113,7 @@ def test_covered_head_keeps_hair_services(monkeypatch):
     assert result["hair_density"] != "Sparse / Bald" and result["hair_length_needs_confirmation"] is True
     looks = recommendation_engine.recommend("Oval", result["hair_length"], result["hair_density"], gender="Women",
                                             target_service_type="Hair")
-    assert len(looks) == 4
+    assert settings.STYLE_RECOMMENDATION_MIN <= len(looks) <= settings.STYLE_RECOMMENDATION_COUNT
 
 
 def test_front_photo_cut_off_by_the_frame_is_lengthened_by_the_back_photo(monkeypatch):
@@ -216,13 +217,18 @@ def test_curly_women_are_only_offered_curly_cuts(texture, length, category):
                                             target_service_type="Hair", style_category=category,
                                             trim_preference="0 - 1 cm micro-trim")
     family = {"Curly": "3", "Coily": "4"}[texture]
-    assert len(looks) == 4 and all(family in {c[:1] for c in s["hair_types"]} for s in looks)
+    fits = [family in {c[:1] for c in s["hair_types"]} for s in looks]
+    assert settings.STYLE_RECOMMENDATION_MIN <= len(looks) <= settings.STYLE_RECOMMENDATION_COUNT
+    # curly looks fill the first slots; other textures only fill what the catalogue cannot (long + keep length)
+    # (medium coily hair with "keep length" has only 3 coily cuts of that length in the catalogue)
+    assert sum(fits) >= 3 and fits == sorted(fits, reverse=True)
 
 
 def test_straight_women_are_not_offered_curly_cuts():
     looks = recommendation_engine.recommend("Oval", "Medium", "Medium", hair_type="Straight", gender="Women",
                                             target_service_type="Hair", style_category="Trendy")
-    assert looks and all("1" in {c[:1] for c in s["hair_types"]} for s in looks)
+    assert settings.STYLE_RECOMMENDATION_MIN <= len(looks) <= settings.STYLE_RECOMMENDATION_COUNT
+    assert all("1" in {c[:1] for c in s["hair_types"]} for s in looks)
 
 
 def test_catalogue_ids_are_unique_and_haircuts_never_resolve_to_beards():
@@ -245,3 +251,93 @@ def test_reference_photo_only_from_the_customers_own_collection():
 def test_weaker_fallback_is_not_used_after_a_rejected_preview_by_default():
     from app.core.config import settings
     assert settings.FALLBACK_AFTER_REJECTED_PREVIEW is False
+
+
+# ---------------------------------------------------------------- 4 to 8 looks, all achievable today
+@pytest.mark.parametrize("gender,length,texture", [
+    ("Women", "Medium", "Straight"), ("Women", "Medium", "Curly"), ("Women", "Long", "Wavy"),
+    ("Women", "Long", "Curly"), ("Men", "Short", "Straight"), ("Men", "Medium", "Wavy"), ("Men", "Buzz", "Unknown")])
+@pytest.mark.parametrize("category", ["Classic", "Trendy", "Professional"])
+def test_only_achievable_looks_between_min_and_max(gender, length, texture, category):
+    looks = recommendation_engine.recommend("Oval", length, "Thick", hair_type=texture, gender=gender,
+                                            target_service_type="Hair", style_category=category,
+                                            trim_preference="0 - 1 cm micro-trim")
+    assert settings.STYLE_RECOMMENDATION_MIN <= len(looks) <= settings.STYLE_RECOMMENDATION_COUNT
+    assert all(s.get("feasible", True) for s in looks)
+    assert len({s["id"] for s in looks}) == len(looks)
+
+
+# ---------------------------------------------------------------- Hair Cut & Trim Length Preference
+def _lengths(length, trim, gender="Women"):
+    looks = recommendation_engine.recommend("Oval", length, "Medium", hair_type="Straight", gender=gender,
+                                            target_service_type="Hair", style_category="Trendy", trim_preference=trim)
+    return {s["hair_length"] for s in looks}
+
+
+def test_keep_length_trim_applies_to_medium_hair_too():
+    assert _lengths("Medium", "0 - 1 cm micro-trim") <= {"Medium", "Lob"}      # no bob or pixie
+    assert _lengths("Medium", None) & {"Short", "Bob"}                         # no choice: any cut
+
+
+def test_small_trim_on_short_hair_keeps_short_cuts():
+    assert _lengths("Short", "2cm", gender="Men") <= {"Short"}
+    assert "Buzz" in _lengths("Short", "10 cm", gender="Men")
+
+
+def test_trim_reaches_every_prompt_and_no_trim_means_no_length_limit():
+    woman = dict(WOMAN, hair_length="Long", hair_type="Straight")
+    style = get_style(28)
+    for max_chars in (None, 800):
+        assert "TRIM" not in prompt_engine.build_prompt(woman, style, max_chars=max_chars)
+        kept = prompt_engine.build_prompt(dict(woman, trim_preference="0 - 1 cm micro-trim"), style, max_chars=max_chars)
+        assert "1 cm" in kept and "same overall length" in kept
+    view = prompt_engine.build_view_prompt(dict(woman, trim_preference="5cm"), style, "back")
+    assert "only about 5 cm cut off" in view
+
+
+def test_generation_uses_the_trim_the_looks_were_recommended_for():
+    from types import SimpleNamespace
+    from app.api.v1.endpoints import _apply_trim
+    analysis = {"trim_preference": "stale"}
+    _apply_trim(analysis, SimpleNamespace(trim_preference="5cm"), None)
+    assert analysis["trim_preference"] == "5cm"
+    _apply_trim(analysis, SimpleNamespace(trim_preference=None), "")
+    assert "trim_preference" not in analysis                                   # any cut
+
+
+def test_inches_are_converted():
+    assert parse_trim_cm("1 inch") == pytest.approx(2.54)
+
+
+# ---------------------------------------------------------------- short hair: trim judged by the top length
+def test_keep_length_on_8cm_of_hair_never_offers_caesar_crew_or_buzz():
+    for texture in ("Wavy", "Curly", "Straight"):
+        for category in ("Classic", "Trendy", "Professional"):
+            looks = recommendation_engine.recommend("Oval", "Short", "Thick", hair_type=texture, gender="Men",
+                                                    target_service_type="Hair", style_category=category,
+                                                    trim_preference="0 - 1 cm micro-trim", hair_top_cm=8.4)
+            names = {s["name"] for s in looks}
+            assert len(looks) >= settings.STYLE_RECOMMENDATION_MIN
+            assert not names & {"Caesar Cut", "Classic Crew Cut", "Modern Buzz Cut + Precision Line Up"}
+
+
+def test_bigger_trim_or_no_choice_allows_short_cuts():
+    looks = recommendation_engine.recommend("Oval", "Short", "Thick", hair_type="Straight", gender="Men",
+                                            target_service_type="Hair", style_category="Professional",
+                                            trim_preference="5cm", hair_top_cm=8.4)
+    assert "Caesar Cut" in {s["name"] for s in looks}
+
+
+def test_short_hair_prompt_states_the_top_length_to_keep():
+    man = {"gender": "Men", "hair_length": "Short", "hair_top_cm": 8.4, "trim_preference": "0 - 1 cm micro-trim",
+           "beard_style_current": "Clean Shaven"}
+    caesar = next(s for s in ALL_STYLES if s["name"] == "Caesar Cut")
+    for max_chars in (None, 800):
+        prompt = prompt_engine.build_prompt(man, caesar, max_chars=max_chars)
+        assert "7.4 cm" in prompt and len(prompt) <= (max_chars or 10_000)
+
+
+def test_side_part_is_not_needs_growth_for_8cm_of_hair():
+    from app.ai.recommendation_engine import trim_allows, top_removal_cm
+    side_part = next(s for s in ALL_STYLES if s["name"] == "Classic Executive Side Part")
+    assert top_removal_cm(side_part, "Short", 8.4) > 0 and trim_allows(side_part, "Short", "0 - 1 cm micro-trim", 8.4)

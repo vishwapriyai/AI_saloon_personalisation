@@ -93,46 +93,70 @@ export const FrequentServices: React.FC<{ services?: { name: string; count: numb
     <div className="flex flex-wrap gap-1.5">
       {services.slice(0, 3).map((s) => <ServiceChip key={s.name} name={s.name} count={showCount ? s.count : undefined} />)}
     </div>
-  ) : <p className="text-xs text-slate-500">No services recorded yet</p>;
+  ) : <p className="h-7 flex items-center text-xs text-slate-500">No services recorded yet</p>;
+
+const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5">{children}</p>
+);
+
+/** One stat in the 2 x 2 grid; fixed columns keep Visits/Avg and Branches/Total aligned on every card. */
+const Stat: React.FC<{ icon: LucideIcon; tone: string; label: string; value: React.ReactNode }> = ({ icon: Icon, tone, label, value }) => (
+  <div className="flex items-center gap-1.5 min-w-0 text-xs">
+    <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${tone}`} />
+    <span className="text-slate-400">{label}</span>
+    <b className="text-slate-100 truncate">{value}</b>
+  </div>
+);
 
 /**
  * Compact profile card: photo, name, ID, client type, visits | branches, average | total spend,
- * top 3 services and the branches visited.
+ * top 3 services and the branches visited. Sections stack in a fixed order so cards side by side line up;
+ * `footer` is pinned to the bottom of the card.
  */
-export const CustomerSummaryCard: React.FC<{ customer: CustomerSummaryData; large?: boolean; showBranches?: boolean }> = ({ customer: c, large = false, showBranches = true }) => (
-  <div className="space-y-3 min-w-0">
-    <div className="flex items-center gap-3.5 min-w-0">
+export const CustomerSummaryCard: React.FC<{
+  customer: CustomerSummaryData; large?: boolean; showBranches?: boolean; footer?: React.ReactNode;
+}> = ({ customer: c, large = false, showBranches = true, footer }) => (
+  <div className="flex flex-col gap-3 min-w-0 h-full">
+    <div className="flex items-start gap-3 min-w-0">
       <CustomerAvatar name={c.full_name} url={c.avatar_url} size={large ? 'lg' : 'md'} />
-      <div className="min-w-0 space-y-1">
-        <div className="flex items-center gap-2 flex-wrap">
-          <h3 className={`font-bold text-white truncate ${large ? 'text-2xl' : 'text-base'}`}>{c.full_name}</h3>
+      <div className="min-w-0 flex-1 space-y-1 pt-0.5">
+        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          <h3 className={`font-bold text-white truncate max-w-full ${large ? 'text-2xl' : 'text-base'}`}>{c.full_name}</h3>
           <CustomerTypeBadge type={c.customer_type} />
-          <VisitorStatusBadge status={c.visitor_status} label={c.visitor_status_label} homeBranch={c.home_branch_name} />
         </div>
-        <p className="text-xs text-slate-400">Customer ID: <span className="font-mono text-amber-300">{c.customer_code}</span></p>
-        <p className="text-xs text-slate-300 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="inline-flex items-center gap-1"><CalendarCheck className="w-3.5 h-3.5 text-purple-400" /> <b>{c.total_visits}</b> Visits</span>
-          <span className="inline-flex items-center gap-1"><MapPin className="w-3.5 h-3.5 text-sky-400" /> <b>{c.branches_visited_count ?? 0}</b> {c.branches_visited_count === 1 ? 'Branch' : 'Branches'}</span>
-        </p>
-        <p className="text-xs text-slate-300 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="inline-flex items-center gap-1"><IndianRupee className="w-3.5 h-3.5 text-emerald-400" /> Avg <b>{inr(c.average_spend ?? 0)}</b></span>
-          <span className="inline-flex items-center gap-1"><Wallet className="w-3.5 h-3.5 text-emerald-400" /> Total <b>{inr(c.total_spent ?? 0)}</b></span>
-        </p>
+        <p className="text-xs text-slate-400 truncate">Customer ID: <span className="font-mono text-amber-300">{c.customer_code}</span></p>
+        {c.visitor_status && (
+          <div><VisitorStatusBadge status={c.visitor_status} label={c.visitor_status_label} homeBranch={c.home_branch_name} /></div>
+        )}
       </div>
     </div>
+
+    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-xl bg-slate-800/40 border border-slate-700/50 px-3 py-2">
+      <Stat icon={CalendarCheck} tone="text-purple-400" label="Visits" value={c.total_visits} />
+      <Stat icon={MapPin} tone="text-sky-400" label={c.branches_visited_count === 1 ? 'Branch' : 'Branches'} value={c.branches_visited_count ?? 0} />
+      <Stat icon={IndianRupee} tone="text-emerald-400" label="Avg" value={inr(c.average_spend ?? 0)} />
+      <Stat icon={Wallet} tone="text-emerald-400" label="Total" value={inr(c.total_spent ?? 0)} />
+    </div>
+
     <div>
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Frequently Used Services</p>
+      <SectionLabel>Frequently Used Services</SectionLabel>
       <FrequentServices services={c.frequent_services} showCount={large} />
     </div>
+
     {showBranches && !!c.branches_visited?.length && (
-      <div className="flex flex-wrap gap-1.5">
-        {c.branches_visited.map((b) => (
-          <span key={b} className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300">
-            <MapPin className="w-3 h-3 text-sky-400" /> {b}
-          </span>
-        ))}
+      <div>
+        <SectionLabel>Branches Visited</SectionLabel>
+        <div className="flex flex-wrap gap-1.5">
+          {c.branches_visited.map((b) => (
+            <span key={b} className="inline-flex items-center gap-1 h-7 text-[11px] px-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-300">
+              <MapPin className="w-3 h-3 text-sky-400" /> {b}
+            </span>
+          ))}
+        </div>
       </div>
     )}
+
+    {footer && <div className="mt-auto pt-2.5 border-t border-slate-700/50">{footer}</div>}
   </div>
 );
 

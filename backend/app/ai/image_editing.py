@@ -40,6 +40,27 @@ from app.core.storage import storage_service
 
 logger = logging.getLogger(__name__)
 
+
+def _attach_file_log() -> None:
+    """Keeps every provider request, error, retry and fallback in a log file (the console scrolls away), so the
+    reason a preview fell back to another provider can always be looked up."""
+    from logging.handlers import RotatingFileHandler
+    path = settings.IMAGE_LOG_FILE
+    if not path or any(isinstance(h, RotatingFileHandler) for h in logger.handlers):
+        return
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        handler = RotatingFileHandler(path, maxBytes=5_000_000, backupCount=5, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        handler.setLevel(logging.INFO)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    except OSError as e:
+        logger.warning("Image generation log file unavailable (%s): %s", path, e)
+
+
+_attach_file_log()
+
 def log_progress(step: str, details: str, level: str = "INFO"):
     colors = {
         "INFO": "\033[94m",     # Bright Blue
@@ -55,7 +76,7 @@ def log_progress(step: str, details: str, level: str = "INFO"):
         print(msg, flush=True)
     except Exception:
         print(f"[AI-PIPELINE] [{level}] {step}: {details}", flush=True)
-    logger.info("%s: %s", step, details)
+    logger.log(logging.WARNING if level in ("WARNING", "ERROR") else logging.INFO, "%s: %s", step, details)
 
 
 def log_api_exceeded_warning(provider: str, model: str, error_msg: str, hint: str = ""):
@@ -398,7 +419,7 @@ def add_preview_label(img: Image.Image) -> Image.Image:
 # Validation
 # ----------------------------------------------------------------------------
 # Bump when the validation rules change, so cached previews accepted under older rules are not reused
-VALIDATION_VERSION = "validate-v8-facial-hair-curls"
+VALIDATION_VERSION = "validate-v10-trim-area"
 
 
 @dataclass
@@ -419,7 +440,7 @@ class ValidationProfile:
 
 
 # Catalogue finished lengths -> rank on the same scale as the measured length (Short / Medium / Long / Very Long)
-TARGET_LENGTH_RANK = {"short": 2.0, "bob": 2.5, "lob": 3.0, "medium": 3.0, "long": 4.0, "very long": 5.0}
+TARGET_LENGTH_RANK = {"buzz": 1.0, "short": 2.0, "bob": 2.5, "lob": 3.0, "medium": 3.0, "long": 4.0, "very long": 5.0}
 MEASURED_LENGTH_RANK = {"Short": 2.0, "Medium": 3.0, "Long": 4.0, "Very Long": 5.0}
 COLOUR_MIN_DELTA_E = 4.0           # a colour look that leaves the hair colour almost unchanged was not applied
 BEARD_MIN_CHANGED_FRACTION = 0.04  # share of the lower face that must change for a beard look
@@ -466,6 +487,59 @@ def _style_not_applied(src: SourcePhoto, edited_rgb: np.ndarray, face: FaceGeome
 # hair down legitimately shows much more hair, so that case is not limited.
 MAX_HAIR_AREA_RATIO = {"shorter": 1.25, "same": 1.40}
 MAX_HAIR_AREA_RATIO_KEEP_CUT = 1.30   # colour looks keep the cut
+
+
+FACE_HEIGHT_CM = 18.0       # forehead-top to chin landmark distance on an adult face, for converting pixels to cm
+TRIM_TOLERANCE_CM = 4.0     # extra shortening tolerated beyond the chosen trim (curl bounce, measurement noise)
+TRIM_MIN_AREA_RATIO = 0.85  # share of the hair (above the chin) a trim must keep: 0.80 for 1 cm, 0.75 for 2 cm, ...
+TRIM_AREA_PER_CM = 0.05
+TRIM_MIN_AREA_FLOOR = 0.40
+
+
+def _hair_bottom(mask: np.ndarray, face: FaceGeometry) -> Optional[float]:
+    """Lowest row of the hair growing from the head (fragments starting below the chin are ignored)."""
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), 8)
+    visible = int(mask.sum())
+    keep = [i for i in range(1, n) if stats[i, cv2.CC_STAT_TOP] < face.chin_y
+            and stats[i, cv2.CC_STAT_AREA] > 0.02 * visible]
+    if not keep:
+        return None
+    return float(max(stats[i, cv2.CC_STAT_TOP] + stats[i, cv2.CC_STAT_HEIGHT] - 1 for i in keep))
+
+
+def _trim_problem(src: "SourcePhoto", face: FaceGeometry, mask: np.ndarray, style: Dict[str, Any],
+                  analysis: Optional[Dict[str, Any]]) -> Optional[str]:
+    """
+    The customer's trim choice is followed: the hair around the head keeps most of its area (the main check for short
+    hair), and the hair may end at most the chosen trim (plus a tolerance) higher than in the photo. Measured below the chin in face heights, so it applies to hair reaching past the chin; shorter
+    hair and tied-back hair cannot be measured this way. Deliberately shorter looks are judged by their target length
+    instead. No trim choice = any cut, nothing to check.
+    """
+    from app.ai.recommendation_engine import parse_trim_cm
+    analysis = analysis or {}
+    trim_cm = parse_trim_cm(analysis.get("trim_preference"))
+    if (trim_cm is None or style.get("service", "Hair") != "Hair" or analysis.get("hair_tied_back")
+            or _length_change_of(analysis, style) == "shorter"):
+        return None
+    # Hair around the head (above the chin): a cut that keeps the length keeps most of it. A Caesar or comb-over on
+    # 8 cm of hair keeps ~60%; cuts that respected a 1 cm trim kept 94-104% on the previews measured.
+    area_before = float(src.hair_mask[:int(src.face.chin_y)].sum()) / src.face.width ** 2
+    area_after = float(mask[:int(face.chin_y)].sum()) / face.width ** 2
+    min_ratio = max(TRIM_MIN_AREA_FLOOR, TRIM_MIN_AREA_RATIO - TRIM_AREA_PER_CM * trim_cm)
+    if area_before > 0.05 and area_after / area_before < min_ratio:
+        return (f"too much hair cut off for the chosen trim ({area_after / area_before:.0%} of the hair kept, "
+                f"chose {trim_cm:g} cm)")
+    before, after = _hair_bottom(src.hair_mask, src.face), _hair_bottom(mask, face)
+    if before is None or after is None:
+        return None
+    below_before = (before - src.face.chin_y) / src.face.height
+    below_after = (after - face.chin_y) / face.height
+    if below_before <= 0.1:
+        return None
+    removed_cm = (below_before - below_after) * FACE_HEIGHT_CM
+    if removed_cm > trim_cm + TRIM_TOLERANCE_CM:
+        return f"cut shorter than the chosen trim (about {removed_cm:.0f} cm off, chose {trim_cm:g} cm)"
+    return None
 
 
 def _length_change_of(analysis: Optional[Dict[str, Any]], style: Dict[str, Any]) -> Optional[str]:
@@ -585,7 +659,8 @@ def validate_edit(src: SourcePhoto, edited_rgb: np.ndarray, style: Dict[str, Any
         if hair_de > settings.HAIR_COLOUR_MAX_DELTA_E and not profile.colour_change_allowed:
             return Validation(f"hair colour changed (deltaE {hair_de:.1f})", identity, hair_score)
 
-    missed = _style_not_applied(src, edited_rgb, face, mask, style, profile, hair_de)
+    missed = _style_not_applied(src, edited_rgb, face, mask, style, profile, hair_de) or _trim_problem(
+        src, face, mask, style, analysis)
     if missed:
         return Validation(missed, identity, hair_score)
     if profile.service != "Beard":
@@ -599,6 +674,40 @@ def validate_edit(src: SourcePhoto, edited_rgb: np.ndarray, style: Dict[str, Any
 # ----------------------------------------------------------------------------
 # Providers
 # ----------------------------------------------------------------------------
+# Temporary Gemini / Vertex AI errors are retried on Gemini (with a growing wait) before the fallback provider is
+# used: 408 timeout, 429 too many requests (Vertex shares image-model capacity, so 429s come and go even at low
+# volume), 500/502/503/504 server-side problems, and dropped connections.
+GEMINI_TRANSIENT_CODES = {408, 429, 500, 502, 503, 504}
+GEMINI_TRANSIENT_WORDS = ("RESOURCE_EXHAUSTED", "UNAVAILABLE", "DEADLINE_EXCEEDED", "INTERNAL", "OVERLOADED",
+                          "TIMEOUT", "TIMED OUT", "CONNECTERROR", "CONNECTION", "REMOTEPROTOCOLERROR", "READERROR")
+# Finish reasons that mean the image was withheld by a safety filter (retried once with context, then reported)
+GEMINI_SAFETY_REASONS = {"SAFETY", "IMAGE_SAFETY", "PROHIBITED_CONTENT", "IMAGE_PROHIBITED_CONTENT", "BLOCKLIST",
+                         "SPII", "RECITATION", "IMAGE_RECITATION"}
+GEMINI_TYPICAL_REQUEST_SECONDS = 20.0  # one image edit takes ~10-18 s on Vertex
+SAFETY_CONTEXT = ("Context: this is the salon customer's own photo, shared with their consent for a hairstyle "
+                  "preview at the salon. Edit only the hair, keep the person fully clothed and unchanged, and "
+                  "return the edited photo as an image.")
+
+
+def _is_transient_gemini_error(code: Optional[int], text: str) -> bool:
+    upper = text.upper()
+    return (code in GEMINI_TRANSIENT_CODES) or any(word in upper for word in GEMINI_TRANSIENT_WORDS)
+
+
+def _no_image_reason(resp: Any) -> str:
+    """Why an answer has no image: the candidate's finish reason, the prompt block reason, or TEXT_ONLY."""
+    for cand in getattr(resp, "candidates", None) or []:
+        reason = getattr(cand, "finish_reason", None)
+        name = getattr(reason, "name", None) or (str(reason) if reason else "")
+        if name and name.upper() not in ("STOP", "FINISH_REASON_UNSPECIFIED"):
+            return name.upper().replace("FINISHREASON.", "")
+    feedback = getattr(resp, "prompt_feedback", None)
+    block = getattr(feedback, "block_reason", None) if feedback else None
+    if block:
+        return (getattr(block, "name", None) or str(block)).upper().replace("BLOCKEDREASON.", "")
+    return "TEXT_ONLY"
+
+
 class GeminiEditor:
     name = "gemini"
     supports_back_image = True  # other providers take one photo (+ optional style reference) only
@@ -658,27 +767,35 @@ class GeminiEditor:
             contents.append(types.Part.from_bytes(data=back_image, mime_type="image/jpeg"))
         if reference:
             contents.append(types.Part.from_bytes(data=reference, mime_type="image/jpeg"))
-        contents.append(prompt)
+        log_tag = "VERTEX" if self._is_vertex else "GEMINI"
+        started = time.monotonic()
+        deadline = started + settings.GEMINI_RETRY_BUDGET_SECONDS
+        waits = list(settings.GEMINI_RETRY_WAITS_SECONDS)
+        image_only = False      # set after a text-only answer: ask for the image modality only
+        safety_retried = False  # a safety block is retried once, with the consent / hair-only context
+        last_error = f"{log_tag} generation failed"
+        tried_keys_this_round = 0
 
-        # Try clients from the pool; if one key hits a rate limit (429 / RESOURCE_EXHAUSTED), failover to next key
-        last_error = None
-        for key_try in range(len(self._clients)):
+        for request_no in range(1, settings.GEMINI_MAX_REQUESTS + 1):
             client, key = self._next_client()
             masked_key = key if self._is_vertex else (key[:6] + "..." + key[-4:] if len(key) > 10 else "***")
-            log_tag = "VERTEX" if self._is_vertex else "GEMINI"
-            provider_label = f"Vertex AI ({self._project})" if self._is_vertex else f"API Key #{key_try + 1}/{len(self._clients)} ({masked_key})"
-            log_progress(f"{log_tag}-REQUEST", f"Sending request using {provider_label} to '{model_name}'...")
+            provider_label = (f"Vertex AI ({self._project})" if self._is_vertex
+                              else f"API Key ({masked_key})")
+            log_progress(f"{log_tag}-REQUEST", f"Request {request_no} using {provider_label} to '{model_name}'...")
+            request_contents = contents + ([SAFETY_CONTEXT] if safety_retried else []) + [prompt]
+            retry_kind = None  # None = give up, "now" = another key right away, "wait" = back off first
 
             try:
                 resp = await client.aio.models.generate_content(
                     model=model_name,
-                    contents=contents,
-                    config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
+                    contents=request_contents,
+                    config=types.GenerateContentConfig(response_modalities=["IMAGE"] if image_only else ["TEXT", "IMAGE"]),
                 )
                 for cand in resp.candidates or []:
                     for part in (cand.content.parts if cand.content else []) or []:
                         if part.inline_data and part.inline_data.data:
-                            log_progress(f"{log_tag}-SUCCESS", f"Successfully generated image using {provider_label}!", "SUCCESS")
+                            log_progress(f"{log_tag}-SUCCESS", f"Successfully generated image using {provider_label} "
+                                         f"(request {request_no}, {time.monotonic() - started:.1f}s)", "SUCCESS")
                             if usage is not None and resp.usage_metadata:
                                 um = resp.usage_metadata
                                 usage["input_tokens"] = um.prompt_token_count or 0
@@ -688,28 +805,51 @@ class GeminiEditor:
                                 if price:
                                     usage["cost_usd"] = (usage["input_tokens"] * price[0] + usage["output_tokens"] * price[1]) / 1e6
                             return part.inline_data.data
-                reason = resp.candidates[0].finish_reason if resp.candidates else getattr(resp, "prompt_feedback", None)
-                last_error = f"{log_tag} returned no image (reason: {reason})"
+                # Answered, but without an image
+                reason = _no_image_reason(resp)
+                if reason in GEMINI_SAFETY_REASONS:
+                    last_error = (f"{log_tag} declined to edit this photo (safety filter: {reason}). Please use a clear, "
+                                  "recent photo of the customer taken in the salon.")
+                    if not safety_retried:
+                        safety_retried, retry_kind = True, "now"
+                else:
+                    last_error = f"{log_tag} answered without an image (reason: {reason})"
+                    image_only, retry_kind = True, "now"
 
             except APIError as e:
-                is_rate_limit = (e.code == 429 or "RESOURCE_EXHAUSTED" in str(e).upper() or "QUOTA" in str(e).upper())
-                if is_rate_limit and key_try < len(self._clients) - 1:
-                    log_progress(f"{log_tag}-KEY-ROTATE", f"Key {masked_key} hit rate limit ({e.message}). Rotating to next key in pool...", "WARNING")
-                    last_error = f"{log_tag} hit rate limits / quota exceeded ({e.message})"
-                    continue
+                last_error = f"{log_tag} API error {e.code}: {e.message}"
+                if _is_transient_gemini_error(e.code, str(e)):
+                    tried_keys_this_round += 1
+                    # API-key pool: another key first (each key has its own quota), then wait
+                    retry_kind = "now" if (e.code == 429 and tried_keys_this_round < len(self._clients)) else "wait"
                 else:
-                    log_api_exceeded_warning(provider_label, model_name, f"HTTP {e.code}: {e.message}")
-                    raise ImageEditError(f"{log_tag} API error {e.code}: {e.message}")
-            except Exception as e:
-                err_str = str(e)
-                is_rate_limit = ("429" in err_str or "RESOURCE_EXHAUSTED" in err_str.upper() or "QUOTA" in err_str.upper())
-                if is_rate_limit and key_try < len(self._clients) - 1:
-                    log_progress(f"{log_tag}-KEY-ROTATE", f"Key {masked_key} hit rate limit ({err_str}). Rotating to next key in pool...", "WARNING")
-                    last_error = f"{log_tag} hit rate limit ({err_str})"
-                    continue
-                raise ImageEditError(f"{log_tag} error: {err_str}")
+                    log_api_exceeded_warning(provider_label, model_name, f"HTTP {e.code}: {e.message}",
+                                             "Not a temporary error: check the model name, permissions and billing.")
+                    raise ImageEditError(last_error)
+            except Exception as e:  # network problems, timeouts inside the SDK
+                last_error = f"{log_tag} connection error: {type(e).__name__}: {str(e)[:200]}"
+                retry_kind = "wait" if _is_transient_gemini_error(None, f"{type(e).__name__} {e}") else None
+                if retry_kind is None:
+                    raise ImageEditError(last_error)
 
-        raise ImageEditError(last_error or f"{log_tag} generation failed")
+            log_progress(f"{log_tag}-RETRYABLE", f"Request {request_no}: {last_error}", "WARNING")
+            if retry_kind is None or request_no == settings.GEMINI_MAX_REQUESTS:
+                break
+            wait = 0.0
+            if retry_kind == "wait":
+                tried_keys_this_round = 0
+                wait = waits.pop(0) if waits else settings.GEMINI_RETRY_WAITS_SECONDS[-1]
+            # Stop when another request (~20 s for an image) would not finish within the budget
+            if time.monotonic() + wait + GEMINI_TYPICAL_REQUEST_SECONDS > deadline:
+                log_progress(f"{log_tag}-GIVE-UP", f"No time left for another request ({last_error})", "WARNING")
+                break
+            if wait:
+                log_progress(f"{log_tag}-BACKOFF", f"Waiting {wait:g}s before retrying on {log_tag}", "WARNING")
+                await asyncio.sleep(wait)
+
+        log_api_exceeded_warning(log_tag, model_name, last_error,
+                                 f"Gave up after {request_no} request(s) in {time.monotonic() - started:.0f}s.")
+        raise ImageEditError(last_error)
 
 
 class CloudflareEditor:

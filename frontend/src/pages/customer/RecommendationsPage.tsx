@@ -4,6 +4,9 @@ import { Check, ArrowRight, RefreshCw, ImageOff, Sparkles, Heart, AlertTriangle 
 import { saveSelection, generateStyleImages, generateSelectionViews, saveFavouriteStyle } from '../../api/client';
 import { currentCustomerId } from '../../auth/session';
 
+/** Most looks the recommendation returns (backend STYLE_RECOMMENDATION_COUNT). */
+const MAX_LOOKS = 8;
+
 const SERVICE_LABELS: Record<string, string> = { Beard: 'Beard', Colour: 'Colour', Texture: 'Smoothening / Perm' };
 
 // The main card image is ONLY ever the customer's own edited photo. Catalogue photos are shown
@@ -139,6 +142,9 @@ export const RecommendationsPage: React.FC = () => {
     }
   };
 
+  // Only looks the customer's hair can have today are shown (older saved results may still contain others)
+  const shownStyles = styles.filter((s) => s.feasible !== false);
+
   return (
     <div className="flex-1 flex flex-col space-y-6 py-4">
       {/* Page Title */}
@@ -147,8 +153,15 @@ export const RecommendationsPage: React.FC = () => {
           <span className="text-xs px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 font-semibold border border-amber-500/30">
             STEP 3 OF 4: CHOOSE YOUR LOOK
           </span>
-          <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight mt-1">Your Top {styles.length} Looks</h2>
+          <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight mt-1">
+            Your Top {shownStyles.length} {shownStyles.length === 1 ? 'Look' : 'Looks'}
+          </h2>
           <p className="text-xs sm:text-sm text-slate-400">Your own photo with each recommended hairstyle. Tap to preview & select.</p>
+          {shownStyles.length > 0 && shownStyles.length < MAX_LOOKS && (
+            <p className="text-xs sm:text-sm text-amber-300 mt-1">
+              Based on your hair length and facial features, these {shownStyles.length} styles are the ones we can create for you today.
+            </p>
+          )}
           <p className="text-[11px] text-slate-500 mt-1">
             Previews are AI illustrations to help you choose. The real result depends on your hair and is agreed with your stylist; it is not a guarantee.
           </p>
@@ -167,7 +180,7 @@ export const RecommendationsPage: React.FC = () => {
 
       {/* Recommended styles: responsive touch grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
-        {styles.map((style, idx) => {
+        {shownStyles.map((style, idx) => {
           const isSelected = selectedStyleId === style.style_id;
           return (
             <div
@@ -272,26 +285,13 @@ export const RecommendationsPage: React.FC = () => {
                     <p className="text-[11px] text-amber-300 mt-1">{style.feasibility_warning}</p>
                   )}
                   <p className="text-xs text-slate-400 line-clamp-2 mt-1.5 leading-normal">{style.description}</p>
-                  {style.preview_image_url && (
-                    <div className="mt-2.5 flex items-center gap-2.5">
-                      <img
-                        src={style.preview_image_url}
-                        alt={`${style.name} style reference`}
-                        loading="lazy"
-                        className="w-11 h-11 rounded-lg object-cover border border-slate-700 shrink-0"
-                      />
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Style Reference</span>
-                    </div>
-                  )}
                 </div>
 
-                {/* Why it suits the customer + the stylist's cutting steps */}
-                {style.expert_analysis && (
+                {/* The stylist's cutting steps and any chemical add-on */}
+                {(style.stylist_instructions || style.chemical_addon?.required) && (
                   <div className="bg-slate-900/80 rounded-2xl p-2.5 border border-slate-700/60 text-[11px] space-y-1">
-                    <p className="font-bold text-amber-400">Why it suits you</p>
-                    <p className="line-clamp-3 text-slate-300">{style.expert_analysis.face_shape_rationale}</p>
                     {style.stylist_instructions && (
-                      <details className="pt-1" onClick={(e) => e.stopPropagation()}>
+                      <details onClick={(e) => e.stopPropagation()}>
                         <summary className="cursor-pointer font-semibold text-slate-300 min-h-[28px] flex items-center">Haircut steps</summary>
                         <ol className="mt-1 space-y-0.5 list-decimal list-inside text-slate-400">
                           {String(style.stylist_instructions).split('\n').filter((l: string) => l.trim()).map((l: string, i: number) => (
