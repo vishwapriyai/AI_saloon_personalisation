@@ -35,6 +35,17 @@ def normalize_photo(image_bytes: bytes) -> bytes:
     return buf.getvalue()
 
 
+def _to_builtin(value):
+    """NumPy scalars/arrays -> plain Python values, so the analysis can be saved in JSON columns and returned."""
+    if isinstance(value, dict):
+        return {k: _to_builtin(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_builtin(v) for v in value]
+    if isinstance(value, (np.generic, np.ndarray)):
+        return value.tolist()
+    return value
+
+
 def _load_rgb(image_bytes: bytes) -> np.ndarray:
     img = ImageOps.exif_transpose(Image.open(io.BytesIO(image_bytes))).convert("RGB")
     img.thumbnail((ANALYSIS_MAX_SIDE, ANALYSIS_MAX_SIDE), Image.Resampling.LANCZOS)
@@ -425,7 +436,7 @@ class FaceAnalyzer:
             hair_type = "None"
             hair_colour = "None"
 
-        return {
+        return _to_builtin({
             "gender": "Women" if is_women else "Men",
             "face_shape": front.get("face_shape", UNKNOWN),
             "face_shape_confidence": front.get("face_shape_confidence", 0.0),
@@ -451,7 +462,7 @@ class FaceAnalyzer:
                                   "Hair covered or not visible - please confirm the length" if head_covered and detected_len == UNKNOWN else
                                   _current_hairstyle(detected_len, hair_type, hair_colour, front.get("hairline", UNKNOWN))),
             "quality_check": front.get("quality_metrics", {}),
-        }
+        })
 
 
 face_analyzer = FaceAnalyzer()
