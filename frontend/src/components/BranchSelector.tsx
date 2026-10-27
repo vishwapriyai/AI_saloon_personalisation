@@ -30,16 +30,16 @@ export const BranchSelector: React.FC = () => {
 
   if (!branches.length) return null;
   return (
-    <label className="inline-flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-xl pl-3 pr-1 py-1 text-xs text-slate-300">
-      <MapPin className="w-4 h-4 text-sky-400" />
-      <span className="font-semibold whitespace-nowrap">Working at</span>
+    <label className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#dfe7e1] bg-[#ffffff] pl-3 pr-1 text-xs text-[#6c7e73]">
+      <MapPin aria-hidden="true" className="size-4 text-[#2f6f9f]" />
+      <span className="whitespace-nowrap font-semibold">Working at</span>
       <select value={branchId ?? ''} onChange={(e) => {
           const id = Number(e.target.value);
           localStorage.setItem(KEY, String(id));
           setBranchId(id);
           window.dispatchEvent(new CustomEvent('salon-branch-changed', { detail: id }));
         }}
-        className="bg-slate-800 border border-slate-700 rounded-lg py-2 px-2 text-sm text-white focus:outline-none focus:border-amber-500">
+        className="h-8 cursor-pointer rounded-lg border-0 bg-[#f2f7f3] px-2 text-sm font-semibold text-[#1a2a20] focus:outline-none focus:ring-2 focus:ring-[#2f5d46]/25">
         {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
       </select>
     </label>

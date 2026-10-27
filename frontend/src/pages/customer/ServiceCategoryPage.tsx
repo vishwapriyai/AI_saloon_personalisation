@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Scissors, Sparkles, User, ArrowRight, Palette, Check, Wind, AlertTriangle } from 'lucide-react';
+import { Scissors, Sparkles, User, ArrowRight, Palette, Check, Wind, AlertTriangle, RefreshCw, Ruler, Venus, Mars, VenusAndMars, Crown, Briefcase } from 'lucide-react';
 import { getRecommendations, getLastPreferences } from '../../api/client';
 import { currentCustomerId } from '../../auth/session';
 import { HairAnalysisCard } from '../../components/HairAnalysisCard';
@@ -12,6 +12,13 @@ const TRIM_OPTIONS = [
   { id: '5cm', title: 'Medium Cut', desc: '3 - 5 cm short', value: '5cm' },
   { id: 'custom', title: 'Custom Cut', desc: 'Specify cm / mm short', value: '' },
 ];
+
+const STEPS = ['Photos', 'Preferences', 'Your look', 'Stylist guide'];
+const TRIM_SHORT: Record<string, string> = { '0cm': 'Keep length', '2cm': 'Slight trim', '5cm': 'Medium cut', custom: 'Custom' };
+const TRIM_RANGE: Record<string, string> = { '0cm': '0-1 cm', '2cm': '1-2 cm', '5cm': '3-5 cm', custom: 'your amount' };
+const COLLECTION_ICON: Record<string, React.ElementType> = { Women: Venus, Men: Mars, All: VenusAndMars };
+const CATEGORY_ICON: Record<string, React.ElementType> = { Classic: Crown, Trendy: Sparkles, Professional: Briefcase };
+const SHORT_LABEL: Record<string, string> = { Women: 'Women', Men: 'Men', All: 'All / Unisex' };
 
 export const ServiceCategoryPage: React.FC = () => {
   const navigate = useNavigate();
@@ -185,240 +192,310 @@ export const ServiceCategoryPage: React.FC = () => {
     }
   };
 
+  const visibleServices = services.filter((svc) => !(selectedGender === 'Women' && svc.id === 'Beard'));
+  const notice = (title: string, body: React.ReactNode) => (
+    <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4">
+      <AlertTriangle aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-rose-600" />
+      <div className="space-y-1">
+        <p className="text-sm font-bold text-rose-800">{title}</p>
+        <p className="text-xs leading-relaxed text-rose-700">{body}</p>
+      </div>
+    </div>
+  );
+  const sectionTitle = (n: number, title: string, aside?: React.ReactNode) => (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <h3 className="flex items-center gap-2.5 text-sm font-bold text-[#1a2a20]">
+        <span className="grid size-6 place-items-center rounded-full bg-[#f3d27a] text-[11px] font-bold text-[#1d3d2d]">{n}</span>
+        {title}
+      </h3>
+      {aside}
+    </div>
+  );
+  const categoryTitle = categories.find((c) => c.id === selectedCategory)?.title;
+  const segmented = (options: { id: string; label: string; Icon?: React.ElementType }[], value: string, onPick: (id: string) => void) => (
+    <div role="radiogroup" className="flex flex-wrap gap-2">
+      {options.map(({ id, label, Icon }) => {
+        const on = id === value;
+        return (
+          <button
+            key={id}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => onPick(id)}
+            className={`flex h-10 items-center gap-2 rounded-full border pl-1.5 pr-4 text-[13px] font-semibold transition-all focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#2f5d46]/20 active:scale-[0.98] cursor-pointer ${
+              on
+                ? 'border-transparent bg-[#244a37] text-[#ffffff] shadow-md shadow-[#244a37]/20'
+                : 'border-[#dfe7e1] bg-[#ffffff] text-[#33483c] hover:border-[#c3d3c9]'
+            }`}
+          >
+            {Icon && (
+              <span className={`grid size-7 shrink-0 place-items-center rounded-full ${on ? 'bg-[#ffffff]/15 text-[#f3d27a]' : 'bg-[#e4eee7] text-[#2f5d46]'}`}>
+                <Icon aria-hidden="true" className="size-3.5" />
+              </span>
+            )}
+            <span className="truncate">{label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+
   return (
-    <div className="flex-1 flex flex-col items-center justify-center py-4 sm:py-6">
-      <div className="w-full space-y-6">
-        <div className="text-center">
-          <span className="text-xs px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 font-semibold border border-amber-500/30">
-            STEP 2 OF 4: STYLE PREFERENCES
-          </span>
-          <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight mt-2">Choose Collection & Look</h2>
-          {fromLastVisit && (
-            <p className="text-xs text-amber-300 mt-2">Pre-selected from your last visit. Tap any option to change it.</p>
-          )}
+    <div className="auth-rise flex-1 py-2 sm:py-4">
+      <div className="w-full overflow-clip rounded-3xl border border-[#dfe7e1] bg-[#ffffff] shadow-[0_24px_60px_-30px_rgba(36,74,55,0.35)]">
+        {/* Header band */}
+        <div className="relative overflow-hidden bg-gradient-to-r from-[#1d3d2d] via-[#244a37] to-[#2b5740] px-5 py-5 sm:px-7">
+          <div className="pointer-events-none absolute -right-12 -top-16 size-56 rounded-full bg-[#e9b949]/15 blur-3xl" />
+          <div className="relative flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#f3d27a]">Step 2 of 4</p>
+              <h2 className="mt-1 text-2xl font-bold leading-tight tracking-tight text-[#ffffff]">Choose your look</h2>
+              <p className="mt-1 max-w-xl text-[13px] leading-relaxed text-[#ffffff]/75">
+                {fromLastVisit
+                  ? 'Pre-selected from your last visit. Tap any option to change it.'
+                  : 'Pick a collection, the services you want and a style, and we will create your previews.'}
+              </p>
+            </div>
+            <div className="hidden shrink-0 rounded-2xl bg-[#ffffff]/10 px-4 py-2.5 text-right ring-1 ring-[#ffffff]/10 sm:block">
+              <p className="text-sm font-semibold text-[#ffffff]">{selectedServices.length} service{selectedServices.length === 1 ? '' : 's'}</p>
+              <p className="mt-0.5 text-xs text-[#ffffff]/65">{categoryTitle} style</p>
+            </div>
+          </div>
+
+          <ol aria-label="Progress, step 2 of 4" className="relative mt-4 hidden items-center gap-2 sm:flex">
+            {STEPS.map((label, i) => (
+              <React.Fragment key={label}>
+                <li className="flex items-center gap-2" aria-current={i === 1 ? 'step' : undefined}>
+                  <span className={`grid size-6 place-items-center rounded-full text-[11px] font-bold ${
+                    i === 1 ? 'bg-[#f3d27a] text-[#1d3d2d]' : i < 1 ? 'bg-[#ffffff]/90 text-[#1d3d2d]' : 'bg-[#ffffff]/10 text-[#ffffff]/60'
+                  }`}>
+                    {i < 1 ? <Check aria-hidden="true" className="size-3.5" /> : i + 1}
+                  </span>
+                  <span className={`text-xs ${i === 1 ? 'font-semibold text-[#ffffff]' : i < 1 ? 'text-[#ffffff]/85' : 'text-[#ffffff]/60'}`}>{label}</span>
+                </li>
+                {i < STEPS.length - 1 && <span className={`h-px min-w-3 flex-1 ${i < 1 ? 'bg-[#ffffff]/50' : 'bg-[#ffffff]/15'}`} />}
+              </React.Fragment>
+            ))}
+          </ol>
         </div>
 
-        <HairAnalysisCard showBeard={selectedGender !== 'Women'} onChange={() => setAnalysisVersion((v) => v + 1)} />
-
-        {isCustomerBald && isCleanShaven && selectedGender !== 'Women' && (
-          <div className="bg-red-500/10 border-2 border-red-500/80 p-4 rounded-2xl flex items-start space-x-3 text-red-200 text-xs sm:text-sm shadow-md ring-1 ring-red-500/30">
-            <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <span className="font-bold text-red-300 block text-sm">Notice: Clean-Shaved & Bald Scalp Detected</span>
-              <p className="text-slate-200 leading-relaxed">
-                Haircut, hair colouring, smoothening, and beard sculpting services are disabled because your photo analysis shows a clean-shaven bald face. Scalp care and facial spa treatments are recommended during your visit.
-              </p>
-            </div>
+        {/* Body: analysis (left) + choices (right) */}
+        <div className="grid items-start gap-8 p-4 sm:p-6 lg:grid-cols-[300px_1fr] lg:p-8">
+          <div className="lg:sticky lg:top-24">
+            <HairAnalysisCard showBeard={selectedGender !== 'Women'} onChange={() => setAnalysisVersion((v) => v + 1)} />
           </div>
-        )}
 
-        {isCustomerBald && !isCleanShaven && selectedGender !== 'Women' && (
-          <div className="bg-red-500/10 border-2 border-red-500/80 p-4 rounded-2xl flex items-start space-x-3 text-red-200 text-xs sm:text-sm shadow-md ring-1 ring-red-500/30">
-            <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <span className="font-bold text-red-300 block text-sm">Notice: Bald Scalp Detected</span>
-              <p className="text-slate-200 leading-relaxed">
-                Haircut, hair colouring, and smoothening services are disabled because your photo analysis shows a bald scalp. <b>Beard & Grooming</b> service is selected for you below.
-              </p>
-            </div>
-          </div>
-        )}
+          <div className="flex min-w-0 flex-col gap-8">
+            {isCustomerBald && isCleanShaven && selectedGender !== 'Women' && notice(
+              'Clean-shaven face and bald scalp detected',
+              'Haircut, hair colouring, smoothening, and beard sculpting services are disabled because your photo analysis shows a clean-shaven bald face. Scalp care and facial spa treatments are recommended during your visit.',
+            )}
+            {isCustomerBald && !isCleanShaven && selectedGender !== 'Women' && notice(
+              'Bald scalp detected',
+              <>Haircut, hair colouring, and smoothening services are disabled because your photo analysis shows a bald scalp. <b>Beard &amp; Grooming</b> service is selected for you below.</>,
+            )}
+            {isCustomerBald && selectedGender === 'Women' && notice(
+              'Bald scalp detected',
+              'Haircut, hair colouring, and smoothening services are disabled because your photo analysis shows a bald scalp.',
+            )}
+            {!isCustomerBald && isCleanShaven && selectedGender !== 'Women' && notice(
+              'Clean-shaven face detected',
+              'Beard trimming & sculpting services are disabled because your photo analysis shows a clean-shaven face.',
+            )}
 
-        {isCustomerBald && selectedGender === 'Women' && (
-          <div className="bg-red-500/10 border-2 border-red-500/80 p-4 rounded-2xl flex items-start space-x-3 text-red-200 text-xs sm:text-sm shadow-md ring-1 ring-red-500/30">
-            <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <span className="font-bold text-red-300 block text-sm">Notice: Bald Scalp Detected</span>
-              <p className="text-slate-200 leading-relaxed">
-                Haircut, hair colouring, and smoothening services are disabled because your photo analysis shows a bald scalp.
-              </p>
-            </div>
-          </div>
-        )}
+            {/* 1. Collection */}
+            <section>
+              {sectionTitle(1, 'Style collection')}
+              {segmented(
+                collections.map((c) => ({ id: c.id, label: SHORT_LABEL[c.id] || c.title, Icon: COLLECTION_ICON[c.id] })),
+                selectedGender,
+                (id) => setSelectedGender(id as any),
+              )}
+              <p className="mt-2 text-xs text-[#6c7e73]">{collections.find((c) => c.id === selectedGender)?.desc}</p>
+            </section>
 
-        {!isCustomerBald && isCleanShaven && selectedGender !== 'Women' && (
-          <div className="bg-red-500/10 border-2 border-red-500/80 p-4 rounded-2xl flex items-start space-x-3 text-red-200 text-xs sm:text-sm shadow-md ring-1 ring-red-500/30">
-            <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <span className="font-bold text-red-300 block text-sm">Notice: Clean-Shaven Face Detected</span>
-              <p className="text-slate-200 leading-relaxed">
-                Beard trimming & sculpting services are disabled because your photo analysis shows a clean-shaven face.
-              </p>
-            </div>
-          </div>
-        )}
+            {/* 2. Services */}
+            <section>
+              {sectionTitle(2, 'Services', (
+                <span className="rounded-full bg-[#fdf3d7] px-2.5 py-0.5 text-[11px] font-semibold text-[#7a5a0c]">
+                  {selectedServices.length} selected · choose one or more
+                </span>
+              ))}
+              {(() => {
+                const items = visibleServices.map((svc) => {
+                  const isHair = svc.id === 'Hair' || svc.id === 'Colour / Balayage' || svc.id === 'Keratin / Smoothening';
+                  const isBeard = svc.id === 'Beard';
+                  const disabled = (isCustomerBald && isHair) || ((isCleanShaven || beardUnavailable) && isBeard);
+                  const disabledMsg = isCustomerBald && isHair
+                    ? "not applicable for a bald scalp"
+                    : (isCleanShaven && isBeard)
+                    ? "not applicable for a clean-shaven face"
+                    : (beardUnavailable && isBeard)
+                    ? "beard grooming is in the Men's collection"
+                    : undefined;
+                  return { svc, disabled, disabledMsg };
+                });
+                const available = items.filter((i) => !i.disabled);
+                const unavailable = items.filter((i) => i.disabled);
+                const reasons = [...new Set(unavailable.map((i) => i.disabledMsg).filter(Boolean))];
 
-        {/* Style Collection Selection (Women's / Men's / All) */}
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">1. Select Style Collection</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {collections.map((col) => {
-              const isSelected = selectedGender === col.id;
-              return (
-                <button
-                  key={col.id}
-                  onClick={() => setSelectedGender(col.id as any)}
-                  className={`p-4 rounded-2xl text-left border transition-all touch-target-large active:scale-95 ${
-                    isSelected
-                      ? 'bg-amber-500/10 border-amber-500 text-white ring-2 ring-amber-500/30 shadow-sm'
-                      : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  <h4 className="font-bold text-sm text-amber-400">{col.title}</h4>
-                  <p className="text-[11px] text-slate-400 mt-1 leading-tight">{col.desc}</p>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+                return (
+                  <>
+                    <div className={`grid grid-cols-1 gap-3 ${available.length > 1 ? 'sm:grid-cols-2' : ''}`}>
+                      {available.map(({ svc }) => {
+                        const Icon = svc.icon;
+                        const isSelected = selectedServices.includes(svc.id);
+                        return (
+                          <button
+                            key={svc.id}
+                            type="button"
+                            aria-pressed={isSelected}
+                            onClick={() => toggleService(svc.id)}
+                            className={`flex items-center gap-4 rounded-2xl border p-4 text-left transition-all focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#2f5d46]/20 active:scale-[0.99] cursor-pointer ${
+                              isSelected
+                                ? 'border-transparent bg-gradient-to-br from-[#244a37] to-[#2f5d46] shadow-lg shadow-[#244a37]/25'
+                                : 'border-[#dfe7e1] bg-[#ffffff] hover:border-[#c3d3c9] hover:shadow-sm'
+                            }`}
+                          >
+                            <span className={`grid size-12 shrink-0 place-items-center rounded-xl ${
+                              isSelected ? 'bg-[#ffffff]/15 text-[#f3d27a]' : 'bg-[#e4eee7] text-[#2f5d46]'
+                            }`}>
+                              <Icon aria-hidden="true" className="size-6" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className={`block text-[15px] font-bold ${isSelected ? 'text-[#ffffff]' : 'text-[#1a2a20]'}`}>{svc.title}</span>
+                              <span className={`mt-0.5 block text-xs leading-snug ${isSelected ? 'text-[#ffffff]/75' : 'text-[#6c7e73]'}`}>{svc.desc}</span>
+                            </span>
+                            <span className={`grid size-6 shrink-0 place-items-center rounded-full ${
+                              isSelected ? 'bg-[#f3d27a] text-[#1d3d2d]' : 'border-2 border-[#c3d3c9]'
+                            }`}>
+                              {isSelected && <Check aria-hidden="true" className="size-3.5 stroke-[3]" />}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
 
-        {/* Multi-Select Primary Services */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              2. Select Primary Services <span className="text-amber-400 font-normal">(Select One or More)</span>
-            </h3>
-            <span className="text-[11px] text-amber-400 font-medium bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-              {selectedServices.length} Selected
-            </span>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-            {services.filter((svc) => !(selectedGender === 'Women' && svc.id === 'Beard')).map((svc) => {
-              const Icon = svc.icon;
-              const isSelected = selectedServices.includes(svc.id);
-              const isHair = svc.id === 'Hair' || svc.id === 'Colour / Balayage' || svc.id === 'Keratin / Smoothening';
-              const isBeard = svc.id === 'Beard';
-              const disabled = (isCustomerBald && isHair) || ((isCleanShaven || beardUnavailable) && isBeard);
-              const disabledMsg = isCustomerBald && isHair
-                ? "Not applicable for bald scalp"
-                : (isCleanShaven && isBeard)
-                ? "Not applicable for clean-shaven face"
-                : (beardUnavailable && isBeard)
-                ? "Beard grooming is in Men's collection"
-                : undefined;
-
-              return (
-                <button
-                  key={svc.id}
-                  onClick={() => toggleService(svc.id)}
-                  disabled={disabled}
-                  title={disabledMsg}
-                  className={`p-4 rounded-2xl text-left border transition-all flex flex-col justify-between touch-target-large active:scale-95 relative disabled:opacity-30 disabled:cursor-not-allowed ${
-                    isSelected
-                      ? 'bg-amber-500/10 border-amber-500 text-white ring-2 ring-amber-500/30 shadow-sm'
-                      : disabled
-                      ? 'bg-slate-900/40 border-slate-800 text-slate-600'
-                      : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <Icon className={`w-7 h-7 ${isSelected ? 'text-amber-400' : disabled ? 'text-slate-600' : 'text-slate-400'}`} />
-                    {isSelected ? (
-                      <div className="w-5 h-5 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shadow-sm">
-                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    {unavailable.length > 0 && (
+                      <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-[#f7f8f7] px-3 py-2.5 text-[11px] text-[#7f968a]">
+                        <span className="font-semibold text-[#6c7e73]">Not available:</span>
+                        {unavailable.map(({ svc }) => {
+                          const Icon = svc.icon;
+                          return (
+                            <span key={svc.id} className="inline-flex items-center gap-1.5 rounded-full bg-[#ffffff] px-2.5 py-1 font-medium text-[#8a9a92] ring-1 ring-[#ebf0ec]">
+                              <Icon aria-hidden="true" className="size-3.5" />
+                              {svc.title}
+                            </span>
+                          );
+                        })}
+                        {reasons.length > 0 && <span>· {reasons.join(', ')}</span>}
                       </div>
-                    ) : disabled ? (
-                      <span className="text-[9px] uppercase font-bold text-red-400/90 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20">
-                        Disabled
+                    )}
+                  </>
+                );
+              })()}
+            </section>
+
+            {/* 3. Category */}
+            <section>
+              {sectionTitle(3, 'Style category')}
+              {segmented(
+                categories.map((c) => ({ id: c.id, label: c.title, Icon: CATEGORY_ICON[c.id] })),
+                selectedCategory,
+                (id) => setSelectedCategory(id as any),
+              )}
+              <p className="mt-2 text-xs text-[#6c7e73]">{categories.find((c) => c.id === selectedCategory)?.desc}</p>
+            </section>
+
+            {/* 4. Trim length */}
+            <section>
+              {sectionTitle(4, 'Cut & trim length', (
+                <span className="text-[11px] font-medium text-[#7f968a]">
+                  {trimPreference ? 'Tap again to clear' : 'Optional: no choice shows any cut length'}
+                </span>
+              ))}
+              <div className="flex flex-wrap gap-2">
+                {TRIM_OPTIONS.map((option) => {
+                  const isSelected = trimPreference === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={() => setTrimPreference(isSelected ? '' : option.id)}
+                      className={`flex h-10 items-center gap-2 rounded-full border pl-1.5 pr-4 text-[13px] font-semibold transition-all focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#2f5d46]/20 active:scale-[0.98] cursor-pointer ${
+                        isSelected
+                          ? 'border-transparent bg-[#244a37] text-[#ffffff] shadow-md shadow-[#244a37]/20'
+                          : 'border-[#dfe7e1] bg-[#ffffff] text-[#33483c] hover:border-[#c3d3c9]'
+                      }`}
+                    >
+                      <span className={`grid size-7 shrink-0 place-items-center rounded-full ${isSelected ? 'bg-[#ffffff]/15 text-[#f3d27a]' : 'bg-[#e4eee7] text-[#2f5d46]'}`}>
+                        {option.id === 'custom'
+                          ? <Ruler aria-hidden="true" className="size-3.5" />
+                          : <Scissors aria-hidden="true" className="size-3.5" />}
                       </span>
-                    ) : null}
-                  </div>
-                  <div>
-                    <h4 className={`font-bold text-sm ${disabled ? 'text-slate-500 line-through' : 'text-white'}`}>{svc.title}</h4>
-                    <p className="text-[11px] text-slate-400 mt-1 leading-tight">{disabledMsg || svc.desc}</p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+                      {TRIM_SHORT[option.id] || option.title}
+                      <span className={`text-[11px] font-medium ${isSelected ? 'text-[#ffffff]/65' : 'text-[#8a9a92]'}`}>{TRIM_RANGE[option.id]}</span>
+                    </button>
+                  );
+                })}
+              </div>
 
-        {/* Style Category Selection */}
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">3. Select Aesthetic Category</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-            {categories.map((cat) => {
-              const isSelected = selectedCategory === cat.id;
-              return (
-                <button
-                  key={cat.id}
-                  onClick={() => setSelectedCategory(cat.id as any)}
-                  className={`p-4 rounded-2xl text-left border transition-all touch-target-large active:scale-95 ${
-                    isSelected
-                      ? 'bg-amber-500/10 border-amber-500 text-white ring-2 ring-amber-500/30 shadow-sm'
-                      : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  <h4 className="font-bold text-base text-amber-400">{cat.title}</h4>
-                  <p className="text-xs text-slate-400 mt-1">{cat.desc}</p>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+              {trimPreference === 'custom' ? (
+                <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl bg-[#fafcfa] p-3 ring-1 ring-[#dfe7e1]">
+                  <label htmlFor="custom-trim-val" className="text-xs font-semibold text-[#33483c]">How much to cut?</label>
+                  <input
+                    id="custom-trim-val"
+                    type="text"
+                    value={customTrimVal}
+                    onChange={(e) => setCustomTrimVal(e.target.value)}
+                    placeholder="e.g. 3 cm, 15 mm, 1 inch"
+                    className="h-10 w-40 rounded-full border border-[#c3d3c9] bg-[#ffffff] px-4 text-[13px] font-semibold text-[#1a2a20] placeholder-[#8b9a92] focus:border-[#2f5d46] focus:outline-none focus:ring-4 focus:ring-[#2f5d46]/12"
+                  />
+                  <span className="text-[11px] text-[#7f968a]">e.g. 3 cm, 15 mm, 1 inch</span>
+                </div>
+              ) : (
+                <p className="mt-2.5 text-xs text-[#7f968a]">
+                  {trimPreference
+                    ? TRIM_OPTIONS.find((o) => o.id === trimPreference)?.desc
+                    : 'No preference: looks of any length will be shown'}
+                </p>
+              )}
+            </section>
 
-        {/* Trim / Cut Length Preference Selector */}
-        <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center justify-between">
-            <span>4. Hair Cut & Trim Length Preference</span>
-            <span className="text-amber-400 font-normal text-[11px]">
-              {trimPreference ? 'Tap again to clear' : 'Optional: no choice shows any cut length'}
-            </span>
-          </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {TRIM_OPTIONS.map((option) => {
-              const isSelected = trimPreference === option.id;
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  aria-pressed={isSelected}
-                  onClick={() => setTrimPreference(isSelected ? '' : option.id)}
-                  className={`p-3.5 rounded-2xl text-left border transition-all touch-target-large active:scale-95 ${
-                    isSelected
-                      ? 'bg-amber-500/10 border-amber-500 text-white ring-2 ring-amber-500/30 shadow-sm'
-                      : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-xs text-amber-400">{option.title}</span>
-                    {isSelected && <Check className="w-3.5 h-3.5 text-amber-400 stroke-[3]" />}
-                  </div>
-                  <p className="text-[11px] text-slate-400 leading-tight">{option.desc}</p>
-                </button>
-              );
-            })}
-          </div>
-          {trimPreference === 'custom' && (
-            <div className="mt-3 flex items-center gap-3 bg-slate-900/80 p-3 rounded-xl border border-slate-700">
-              <label htmlFor="custom-trim-val" className="text-xs text-slate-300 font-semibold whitespace-nowrap">Custom Trim Amount:</label>
-              <input
-                id="custom-trim-val"
-                type="text"
-                value={customTrimVal}
-                onChange={(e) => setCustomTrimVal(e.target.value)}
-                placeholder="e.g. 3 cm, 15 mm, 1 inch"
-                className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500 flex-1"
-              />
+            {generateError && (
+              <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-center text-sm font-medium text-rose-700">{generateError}</div>
+            )}
+
+            {/* Generate (sticks to the bottom on small screens) */}
+            <div className="flex flex-col gap-3 border-t border-[#ebf0ec] pt-5 max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:-mx-4 max-lg:-mb-4 max-lg:bg-[#ffffff]/90 max-lg:px-4 max-lg:pb-4 max-lg:backdrop-blur-md sm:max-lg:-mx-6 sm:max-lg:-mb-6 sm:max-lg:px-6 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-[#6c7e73]">
+                <span className="font-semibold text-[#1a2a20]">{collections.find((c) => c.id === selectedGender)?.title}</span>
+                {' · '}{selectedServices.join(', ')}{' · '}{categoryTitle}
+              </p>
+              <button
+                onClick={handleGenerate}
+                disabled={loading}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#244a37] to-[#2f5d46] px-7 text-sm font-semibold text-[#ffffff] shadow-lg shadow-[#244a37]/25 transition-all hover:from-[#1b392b] hover:to-[#244a37] hover:shadow-xl active:scale-[0.98] disabled:opacity-70 cursor-pointer sm:w-auto"
+              >
+                {loading ? (
+                  <>
+                    <RefreshCw className="size-4 animate-spin" />
+                    <span>Finding your looks…</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles aria-hidden="true" className="size-4" />
+                    <span>Generate my looks</span>
+                    <ArrowRight aria-hidden="true" className="size-4" />
+                  </>
+                )}
+              </button>
             </div>
-          )}
+          </div>
         </div>
-
-        {generateError && (
-          <div role="alert" className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300 text-center">{generateError}</div>
-        )}
-        <button
-          onClick={handleGenerate}
-          disabled={loading}
-          className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-4 rounded-2xl text-lg shadow-sm active:scale-[0.98] transition-all flex items-center justify-center space-x-2 touch-target-large"
-        >
-          <Sparkles className="w-6 h-6 text-slate-950" />
-          <span>Generate My Personalized Looks</span>
-          <ArrowRight className="w-5 h-5" />
-        </button>
       </div>
     </div>
   );
 };
-
-

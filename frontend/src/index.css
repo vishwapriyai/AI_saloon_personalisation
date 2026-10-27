@@ -11,8 +11,8 @@
   To change the brand colour, edit the amber values only.
 */
 @theme {
-  --font-sans: "Nunito Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-serif: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-sans: "Poppins", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-serif: "Poppins", Georgia, "Times New Roman", serif;
 
   --color-white: #2a2520;
   --color-black: #1c1814;
@@ -75,23 +75,31 @@
 }
 
 @layer base {
+  *, ::before, ::after {
+    font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
   body {
     background-color: #f4efe6;
     color: #2a2520;
-    font-family: var(--font-sans);
+    font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     margin: 0;
     padding: 0;
     -webkit-font-smoothing: antialiased;
   }
 
-  h1, h2, h3 {
-    font-family: var(--font-serif);
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Poppins', sans-serif;
     font-weight: 600;
     letter-spacing: -0.01em;
   }
 
+  input, button, select, textarea {
+    font-family: 'Poppins', sans-serif;
+  }
+
   /* small uppercase section labels stay in the sans font */
-  h1.uppercase, h2.uppercase, h3.uppercase, h4.uppercase { font-family: var(--font-sans); font-weight: 700; letter-spacing: 0.05em; }
+  h1.uppercase, h2.uppercase, h3.uppercase, h4.uppercase { font-family: 'Poppins', sans-serif; font-weight: 700; letter-spacing: 0.05em; }
 
   ::placeholder { color: #a39788; }
   :focus-visible { outline: 2px solid #2f5d46; outline-offset: 2px; }
@@ -117,4 +125,23 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #b9ac99;
+}
+
+/* Auth screens: gentle entrance */
+@keyframes auth-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.auth-rise { animation: auth-rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .auth-rise { animation: none; }
+}
+
+/* Browser autofill paints inputs light blue; keep them white */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset;
+  -webkit-text-fill-color: #1a2a20;
+  caret-color: #1a2a20;
 }

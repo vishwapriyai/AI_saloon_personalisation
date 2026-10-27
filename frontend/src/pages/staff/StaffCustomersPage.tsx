@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, RefreshCw, UserPlus, Phone, ChevronRight, ArrowLeft, UserCheck, Sparkles, IdCard, KeyRound } from 'lucide-react';
+import { Search, RefreshCw, UserPlus, Phone, ChevronRight, ArrowLeft, UserCheck, Sparkles, IdCard, KeyRound, MapPin, X, ArrowRight } from 'lucide-react';
 import { getCustomerHistory, getCustomers, resetCustomerPassword, type CustomerHistory } from '../../api/client';
-import { CustomerSummaryCard } from '../../components/CustomerInsights';
-import { CustomerFullProfile, LatestLookCard, PreviousStylesStrip, type RepeatableStyle } from '../../components/CustomerFullProfile';
+import { CustomerAvatar, CustomerTypeBadge } from '../../components/CustomerInsights';
+import { ServiceChip } from '../../components/ServiceIcon';
+import { CustomerFullProfile, LatestLookCard, PreviousStylesStrip, ProfileCard, type RepeatableStyle } from '../../components/CustomerFullProfile';
 import { AddCustomerForm } from '../../components/AddCustomerForm';
 import { BranchSelector } from '../../components/BranchSelector';
 import { clearCustomerContext, getSession } from '../../auth/session';
@@ -11,6 +12,44 @@ import { preparePreviousStyle } from '../../utils/previousStyle';
 import { applyPreviousPhotoSession, continueTarget, type ContinueTarget } from '../../utils/continueStyle';
 
 import { workBranchId } from '../../utils/workBranch';
+
+const inr = (n: number) => `₹${Math.round(n || 0).toLocaleString('en-IN')}`;
+
+/** One customer in the directory: who, client type, key numbers and top service at a glance. */
+const DirectoryCard: React.FC<{ c: any; showBranchVisits: boolean; onOpen: () => void }> = ({ c, showBranchVisits, onOpen }) => (
+  <button
+    type="button"
+    onClick={onOpen}
+    className="group flex w-full items-start gap-4 rounded-2xl border border-[#dfe7e1] bg-[#ffffff] p-4 text-left transition-all hover:-translate-y-0.5 hover:border-[#c3d3c9] hover:shadow-md cursor-pointer"
+  >
+    <CustomerAvatar name={c.full_name} url={c.avatar_url} />
+    <div className="min-w-0 flex-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="truncate text-[15px] font-bold text-[#1a2a20]">{c.full_name}</p>
+        <CustomerTypeBadge type={c.customer_type} />
+      </div>
+      <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-[#7f968a]">
+        <span className="font-mono">{c.customer_code}</span>
+        <span aria-hidden="true">·</span>
+        {c.home_branch
+          ? <span className="inline-flex items-center gap-1"><MapPin aria-hidden="true" className="size-3" />{c.home_branch}</span>
+          : <span className="font-semibold text-[#a3762a]">New — no branch yet</span>}
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        <span className="rounded-full bg-[#eef3ee] px-2.5 py-1 text-[11px] font-semibold text-[#33483c]">{c.total_visits} {c.total_visits === 1 ? 'visit' : 'visits'}</span>
+        <span className="rounded-full bg-[#eef3ee] px-2.5 py-1 text-[11px] font-semibold text-[#33483c]">{inr(c.total_spent)}</span>
+        {showBranchVisits && c.visits_at_branch ? (
+          <span className="rounded-full bg-[#e8f1f7] px-2.5 py-1 text-[11px] font-semibold text-[#2f5f7f]">{c.visits_at_branch} here</span>
+        ) : null}
+        {c.frequent_services?.[0] && <ServiceChip name={c.frequent_services[0].name} />}
+      </div>
+      {c.matched_by_phone && (
+        <p className="mt-2 flex items-center gap-1 text-xs text-[#2f5d46]"><Phone aria-hidden="true" className="size-3" /> Matched mobile number</p>
+      )}
+    </div>
+    <ChevronRight aria-hidden="true" className="mt-1 size-5 shrink-0 text-[#a3b3a9] transition-transform group-hover:translate-x-0.5 group-hover:text-[#2f5d46]" />
+  </button>
+);
 
 /** Staff home: find (or add) the customer being served, then repeat a previous style or create a new one. */
 export const StaffCustomersPage: React.FC = () => {
@@ -99,7 +138,7 @@ export const StaffCustomersPage: React.FC = () => {
 
   if (adding) {
     return (
-      <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-6 sm:p-8 shadow-sm">
+      <div className="auth-rise mx-auto w-full max-w-3xl rounded-3xl border border-[#dfe7e1] bg-[#ffffff] p-6 shadow-[0_24px_60px_-30px_rgba(36,74,55,0.3)] sm:p-8">
         <AddCustomerForm initialQuery={searchQuery} onCancel={() => setAdding(false)}
           onCreated={(c) => { setAdding(false); setSearchQuery(''); setSelected({ ...c, customer_type: 'Regular', frequent_services: [], branches_visited: [] }); }} />
       </div>
@@ -108,62 +147,75 @@ export const StaffCustomersPage: React.FC = () => {
 
   if (selected) {
     const target = continueTarget(history, selected.previous_style);
+    const action = 'group flex w-full items-center gap-3 rounded-2xl p-3.5 text-left transition-all active:scale-[0.99] cursor-pointer';
     return (
-      <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
-        <button type="button" onClick={() => setSelected(null)} className="flex items-center space-x-2 text-xs font-semibold text-slate-400 hover:text-white">
-          <ArrowLeft className="w-4 h-4" />
-          <span>Back to Customer Directory</span>
+      <div className="auth-rise space-y-5">
+        <button type="button" onClick={() => setSelected(null)}
+          className="flex items-center gap-2 text-sm font-semibold text-[#4f6b5a] transition-colors hover:text-[#1a2a20] cursor-pointer">
+          <ArrowLeft aria-hidden="true" className="size-4" /> Back to customer directory
         </button>
 
-        {showFullProfile ? (
-          <CustomerFullProfile customerId={selected.id} onRepeat={(s) => repeat(selected, s)} />
-        ) : (
-          <>
-            <div className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/20">
-              <CustomerSummaryCard customer={selected} />
+        <div className="grid items-start gap-5 lg:grid-cols-[330px_minmax(0,1fr)]">
+          {/* LEFT: who + what to do */}
+          <aside className="space-y-3 lg:sticky lg:top-24">
+            <ProfileCard profile={selected} compact />
+
+            <div className="space-y-2">
+              <button type="button" onClick={() => generateNew(selected)}
+                className={`${action} bg-gradient-to-br from-[#244a37] to-[#2f5d46] shadow-lg shadow-[#244a37]/25 hover:shadow-xl`}>
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#ffffff]/15 text-[#f3d27a]"><Sparkles aria-hidden="true" className="size-5" /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-bold text-[#ffffff]">Generate new style</span>
+                  <span className="block text-xs text-[#ffffff]/70">New photos &amp; new looks</span>
+                </span>
+                <ArrowRight aria-hidden="true" className="size-4 text-[#ffffff]/80 transition-transform group-hover:translate-x-0.5" />
+              </button>
+              <button type="button" onClick={() => continuePrevious(selected, target)} disabled={target.kind === 'none'}
+                className={`${action} border border-[#dfe7e1] bg-[#ffffff] hover:border-[#c3d3c9] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50`}>
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#e4eee7] text-[#2f5d46]"><UserCheck aria-hidden="true" className="size-5" /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-bold text-[#1a2a20]">Continue previous style</span>
+                  <span className="line-clamp-1 block text-xs text-[#6c7e73]">{target.hint}</span>
+                </span>
+                <ArrowRight aria-hidden="true" className="size-4 text-[#a3b3a9] transition-transform group-hover:translate-x-0.5" />
+              </button>
+              <button type="button" onClick={() => setShowFullProfile((v) => !v)}
+                className={`${action} border ${showFullProfile ? 'border-[#2f6f9f]/40 bg-[#f3f8fb]' : 'border-[#dfe7e1] bg-[#ffffff]'} hover:border-[#c3d3c9] hover:shadow-md`}>
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#e8f1f7] text-[#2f6f9f]"><IdCard aria-hidden="true" className="size-5" /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-bold text-[#1a2a20]">{showFullProfile ? 'Show summary' : 'View full profile'}</span>
+                  <span className="block text-xs text-[#6c7e73]">{showFullProfile ? 'Back to the quick view' : 'History, styles and gallery'}</span>
+                </span>
+              </button>
             </div>
 
-            <LatestLookCard history={history} />
-
-            <div className="space-y-3">
-              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Previously Selected Styles</h3>
-              {history ? <PreviousStylesStrip history={history} onRepeat={(s) => repeat(selected, s)} limit={4} />
-                : <p className="text-xs text-slate-400 flex items-center gap-2"><RefreshCw className="w-4 h-4 animate-spin" /> Loading styles...</p>}
+            <div className="space-y-2 rounded-2xl border border-[#dfe7e1] bg-[#fafcfa] p-3.5">
+              <button type="button" onClick={() => resetPassword(selected)}
+                className="flex w-full items-center gap-2 text-left text-xs font-semibold text-[#33483c] hover:text-[#1a2a20] cursor-pointer">
+                <KeyRound aria-hidden="true" className="size-4 shrink-0 text-[#a3762a]" /> Forgot password? Issue a one-time password
+              </button>
+              {oneTimePassword && (
+                <p className="text-xs text-[#4f6b5a]">Shown once: <b className="select-all rounded-lg bg-[#fdf3d7] px-2 py-1 font-mono text-sm text-[#5c430a]">{oneTimePassword}</b></p>
+              )}
+              {resetError && <p role="alert" className="text-xs text-rose-700">{resetError}</p>}
             </div>
-          </>
-        )}
+          </aside>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <button type="button"
-            onClick={() => continuePrevious(selected, target)}
-            disabled={target.kind === 'none'}
-            className="p-4 rounded-2xl bg-slate-700 hover:bg-slate-600 border border-slate-600 text-white font-bold flex flex-col items-center justify-center gap-1 touch-target-large active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100">
-            <UserCheck className="w-6 h-6 text-amber-400" />
-            <span>Continue Previous Style</span>
-            <span className="text-[11px] font-medium text-slate-300 text-center line-clamp-2">{target.hint}</span>
-          </button>
-          <button type="button" onClick={() => generateNew(selected)}
-            className="p-4 rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold flex flex-col items-center justify-center gap-1 touch-target-large active:scale-95 shadow-sm">
-            <Sparkles className="w-6 h-6" />
-            <span>Generate New Style</span>
-            <span className="text-[11px] font-medium text-slate-800">New photos & new looks</span>
-          </button>
-          <button type="button" onClick={() => setShowFullProfile((v) => !v)}
-            className="p-4 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold flex flex-col items-center justify-center space-y-2 touch-target-large active:scale-95">
-            <IdCard className="w-6 h-6 text-sky-400" />
-            <span>{showFullProfile ? 'Show Summary' : 'View Full Profile'}</span>
-          </button>
-        </div>
-
-        <div className="pt-2 border-t border-slate-700/60 flex flex-wrap items-center gap-3">
-          <button type="button" onClick={() => resetPassword(selected)}
-            className="min-h-[44px] px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-sm font-semibold flex items-center gap-2">
-            <KeyRound className="w-4 h-4 text-amber-400" /> Forgot password? Issue one-time password
-          </button>
-          {oneTimePassword && (
-            <span className="text-sm text-slate-300">One-time password (shown once): <b className="font-mono text-amber-300 select-all">{oneTimePassword}</b></span>
-          )}
-          {resetError && <span role="alert" className="text-sm text-rose-300">{resetError}</span>}
+          {/* RIGHT: looks */}
+          <div className="min-w-0 space-y-5">
+            {showFullProfile ? (
+              <CustomerFullProfile customerId={selected.id} onRepeat={(s) => repeat(selected, s)} hideProfileCard />
+            ) : (
+              <>
+                <LatestLookCard history={history} />
+                <section className="space-y-3 rounded-2xl border border-[#dfe7e1] bg-[#ffffff] p-5">
+                  <h3 className="text-sm font-bold text-[#1a2a20]">Previously selected styles</h3>
+                  {history ? <PreviousStylesStrip history={history} onRepeat={(s) => repeat(selected, s)} limit={8} />
+                    : <p className="flex items-center gap-2 text-xs text-[#6c7e73]"><RefreshCw className="size-4 animate-spin" /> Loading styles…</p>}
+                </section>
+              </>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -171,82 +223,88 @@ export const StaffCustomersPage: React.FC = () => {
 
   const noMatch = !loading && customers.length === 0;
   return (
-    <div className="bg-slate-800/90 border border-slate-700/70 rounded-2xl p-6 sm:p-8 shadow-sm">
-      <div className="pb-6 mb-6 border-b border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-white">Customer Directory</h2>
-          <p className="text-xs text-slate-400 mt-1">Signed in as {session?.name} ({session?.role}). Select the customer you are serving.</p>
-        </div>
-        <BranchSelector />
-      </div>
-
-      <div className="mb-4 inline-flex p-1 rounded-xl bg-slate-900 border border-slate-700" role="tablist" aria-label="Which customers">
-        {[{ all: false, label: 'This branch' }, { all: true, label: 'All branches' }].map((t) => (
-          <button key={t.label} type="button" role="tab" aria-selected={allBranches === t.all} onClick={() => setAllBranches(t.all)}
-            className={`min-h-[40px] px-4 rounded-lg text-sm font-bold ${allBranches === t.all ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-white'}`}>
-            {t.label}
+    <div className="auth-rise space-y-5">
+      {/* Header band */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#1d3d2d] via-[#244a37] to-[#2b5740] px-5 py-6 shadow-[0_24px_60px_-30px_rgba(36,74,55,0.45)] sm:px-7">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-16 size-56 rounded-full bg-[#e9b949]/15 blur-3xl" />
+        <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#f3d27a]">Customer directory</p>
+            <h2 className="mt-1 text-2xl font-bold tracking-tight text-[#ffffff]">Who are you serving?</h2>
+            <p className="mt-1 text-[13px] text-[#ffffff]/75">Signed in as {session?.name} ({session?.role}). Search, then pick the customer.</p>
+          </div>
+          <button type="button" onClick={() => setAdding(true)}
+            className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-full bg-[#f3d27a] px-5 text-sm font-bold text-[#1d3d2d] shadow-lg shadow-black/20 transition-all hover:bg-[#f0c95f] active:scale-[0.98] cursor-pointer">
+            <UserPlus aria-hidden="true" className="size-4" /> Add new customer
           </button>
-        ))}
-      </div>
-      <p className="text-[11px] text-slate-500 mb-4 -mt-2">
-        {allBranches ? 'Showing customers from every branch.' : 'Customers registered at or visiting this branch, plus new customers without a branch yet.'}
-      </p>
-
-      <div className="mb-6 flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <label htmlFor="customer-search" className="sr-only">Search customer</label>
-          <Search className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
-          <input id="customer-search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Mobile number or customer ID (e.g. CUST-1001), or name..."
-            className="w-full bg-slate-900 border border-slate-700 focus:border-amber-500 rounded-2xl py-3.5 pl-12 pr-4 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20 text-base" />
         </div>
-        <button type="button" onClick={() => setAdding(true)}
-          className="min-h-[52px] px-5 rounded-2xl bg-slate-900 hover:bg-slate-700 border border-amber-500/40 text-amber-300 font-bold flex items-center justify-center gap-2">
-          <UserPlus className="w-5 h-5" /> Add New Customer
-        </button>
+      </div>
+
+      {/* Toolbar */}
+      <div className="space-y-3 rounded-2xl border border-[#dfe7e1] bg-[#ffffff] p-4">
+        <div className="group relative">
+          <label htmlFor="customer-search" className="sr-only">Search customer</label>
+          <Search aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-[#7f968a] group-focus-within:text-[#2f5d46]" />
+          <input id="customer-search" type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Mobile number, customer ID (e.g. CUST-1001) or name"
+            className="h-12 w-full rounded-xl border border-[#c3d3c9] bg-[#ffffff] pl-12 pr-11 text-base text-[#1a2a20] placeholder-[#8b9a92] transition-all hover:border-[#9db5a6] focus:border-[#2f5d46] focus:outline-none focus:ring-4 focus:ring-[#2f5d46]/12" />
+          {searchQuery && (
+            <button type="button" onClick={() => setSearchQuery('')} aria-label="Clear search"
+              className="absolute right-3 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-lg text-[#7f968a] hover:bg-[#eef3ee] hover:text-[#1a2a20] cursor-pointer">
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="inline-flex rounded-xl bg-[#eef3ee] p-1" role="tablist" aria-label="Which customers">
+              {[{ all: false, label: 'This branch' }, { all: true, label: 'All branches' }].map((tb) => (
+                <button key={tb.label} type="button" role="tab" aria-selected={allBranches === tb.all} onClick={() => setAllBranches(tb.all)}
+                  className={`h-8 rounded-lg px-3.5 text-xs font-semibold transition-all cursor-pointer ${
+                    allBranches === tb.all ? 'bg-[#ffffff] text-[#1a2a20] shadow-sm' : 'text-[#4f6b5a] hover:text-[#1a2a20]'
+                  }`}>
+                  {tb.label}
+                </button>
+              ))}
+            </div>
+            {!allBranches && <BranchSelector />}
+          </div>
+          <p className="flex items-center gap-2 text-xs text-[#7f968a]" aria-live="polite">
+            {loading && <RefreshCw aria-hidden="true" className="size-3.5 animate-spin" />}
+            {!loading && `${customers.length} ${customers.length === 1 ? 'customer' : 'customers'}`}
+            {!loading && !allBranches && ' · registered at or visiting this branch, plus new customers'}
+          </p>
+        </div>
       </div>
 
       {loading && customers.length === 0 ? (
-        <div className="py-12 text-center text-slate-400 flex flex-col items-center space-y-3">
-          <RefreshCw className="w-8 h-8 animate-spin text-amber-500" />
-          <span>Loading customer directory...</span>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-32 animate-pulse rounded-2xl bg-[#f3f6f4]" />)}
         </div>
       ) : noMatch ? (
-        <div className="py-12 text-center bg-slate-900/60 rounded-2xl border border-slate-700/50 p-6 space-y-4">
-          <UserPlus className="w-12 h-12 text-slate-500 mx-auto" />
+        <div className="space-y-4 rounded-2xl border border-dashed border-[#c3d3c9] bg-[#fafcfa] px-6 py-12 text-center">
+          <span className="mx-auto grid size-14 place-items-center rounded-full bg-[#e4eee7] text-[#2f5d46]"><UserPlus aria-hidden="true" className="size-6" /></span>
           <div>
-            <p className="text-white font-bold">No customer found{allBranches ? '' : ' at this branch'}</p>
-            <p className="text-xs text-slate-400 mt-1">Check the mobile number or customer ID, or register this customer.</p>
+            <p className="font-bold text-[#1a2a20]">No customer found{allBranches ? '' : ' at this branch'}</p>
+            <p className="mt-1 text-xs text-[#6c7e73]">Check the mobile number or customer ID, or register this customer.</p>
           </div>
-          {!allBranches && (
-            <button type="button" onClick={() => setAllBranches(true)}
-              className="min-h-[52px] px-6 mr-3 rounded-2xl bg-slate-800 border border-slate-700 text-slate-200 font-bold inline-flex items-center gap-2">
-              <Search className="w-5 h-5" /> Search all branches
+          <div className="flex flex-wrap justify-center gap-3">
+            {!allBranches && (
+              <button type="button" onClick={() => setAllBranches(true)}
+                className="inline-flex h-11 items-center gap-2 rounded-xl border border-[#c3d3c9] bg-[#ffffff] px-5 text-sm font-semibold text-[#2f5d46] hover:border-[#2f5d46] cursor-pointer">
+                <Search aria-hidden="true" className="size-4" /> Search all branches
+              </button>
+            )}
+            <button type="button" onClick={() => setAdding(true)}
+              className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#244a37] px-5 text-sm font-semibold text-[#ffffff] shadow-md hover:bg-[#1b392b] cursor-pointer">
+              <UserPlus aria-hidden="true" className="size-4" /> Add new customer
             </button>
-          )}
-          <button type="button" onClick={() => setAdding(true)}
-            className="min-h-[52px] px-6 rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold inline-flex items-center gap-2">
-            <UserPlus className="w-5 h-5" /> Add New Customer
-          </button>
+          </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {customers.map((c) => (
-            <button key={c.id} type="button" onClick={() => setSelected(c)}
-              className="relative h-full text-left p-4 pr-10 rounded-2xl bg-slate-900/80 hover:bg-slate-900 border border-slate-700/70 hover:border-amber-500/60 transition-all flex flex-col">
-              <ChevronRight className="absolute top-5 right-3 w-5 h-5 text-amber-400" />
-              <CustomerSummaryCard customer={c} footer={
-                <div className="space-y-1">
-                  <p className="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-2">
-                    {c.home_branch ? <span>Home branch: <b className="text-slate-300">{c.home_branch}</b></span>
-                      : <span className="font-semibold text-amber-300">New — no branch yet</span>}
-                    {scopeBranch && c.visits_at_branch ? <span>• {c.visits_at_branch} {c.visits_at_branch === 1 ? 'visit' : 'visits'} here</span> : null}
-                  </p>
-                  {c.matched_by_phone && (
-                    <p className="text-xs text-emerald-400 flex items-center gap-1"><Phone className="w-3 h-3" /><span>Matched mobile number</span></p>
-                  )}
-                </div>
-              } />
-            </button>
+            <DirectoryCard key={c.id} c={c} showBranchVisits={!!scopeBranch} onOpen={() => setSelected(c)} />
           ))}
         </div>
       )}

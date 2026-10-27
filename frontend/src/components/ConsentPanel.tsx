@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { ChevronDown, ShieldCheck } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import type { ConsentChoices, ConsentState } from '../api/client';
 
 interface Props {
@@ -22,9 +24,13 @@ const ITEMS: { key: Key; required?: boolean; text: string }[] = [
   { key: 'consent_marketing', text: 'Send me offers by WhatsApp / SMS.' },
 ];
 
+const checkbox = 'mt-0.5 size-4 shrink-0 rounded cursor-pointer accent-[#2f5d46]';
+
 /** Consent under India's DPDP Act, recorded before photos are analysed. */
 export const ConsentPanel: React.FC<Props> = ({ state, choices, onChange, staff }) => {
+  const [open, setOpen] = useState(false);
   const toggle = (key: Key) => onChange({ ...choices, [key]: !choices[key] });
+  const requiredAccepted = choices.consent_photo_analysis && choices.consent_third_party_ai;
   const minor = state?.is_minor;
 
   const allChecked = ITEMS.every(({ key }) => choices[key]) && (!minor || !staff || choices.is_minor_parental_consent);
@@ -42,42 +48,84 @@ export const ConsentPanel: React.FC<Props> = ({ state, choices, onChange, staff 
   };
 
   return (
-    <fieldset className="bg-slate-900/90 p-4 sm:p-5 rounded-2xl border border-slate-700/80 space-y-4 text-left shadow-sm">
-      <legend className="px-1 text-xs font-bold text-amber-400 uppercase tracking-wider">Photo & Privacy Consent</legend>
+    <fieldset className="space-y-3 rounded-2xl border border-[#dfe7e1] bg-[#fafcfa] p-4 text-left sm:p-5">
+      <legend className="sr-only">Photo & Privacy Consent</legend>
 
-      {/* Master Toggle: Single tick box for all */}
-      <label className="flex items-center gap-3 p-3.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border-2 border-amber-500/50 text-xs font-bold text-amber-200 cursor-pointer transition-all shadow-sm">
-        <input
-          type="checkbox"
-          checked={allChecked}
-          onChange={toggleAll}
-          className="w-5 h-5 rounded border-amber-400 accent-amber-500 cursor-pointer flex-shrink-0"
-        />
-        <span className="text-sm font-bold text-amber-300">Consent for all (Select All Terms)</span>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-[#1a2a20]">
+          <span className="grid size-7 place-items-center rounded-full bg-[#e4eee7] text-[#2f5d46]">
+            <ShieldCheck aria-hidden="true" className="size-4" />
+          </span>
+          <h3 className="text-sm font-semibold">Photo &amp; privacy consent</h3>
+        </div>
+        <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+          requiredAccepted ? 'bg-[#e4eee7] text-[#2f5d46]' : 'bg-[#fbeee0] text-[#a3602c]'
+        }`}>
+          {requiredAccepted ? 'Required accepted' : 'Action needed'}
+        </span>
+      </div>
+
+      {/* Master toggle: one tick box for all */}
+      <label className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3.5 py-3 text-sm font-semibold transition-colors ${
+        allChecked
+          ? 'border-[#2f5d46]/50 bg-[#e4eee7] text-[#1d3d2d]'
+          : 'border-[#c3d3c9] bg-[#ffffff] text-[#1a2a20] hover:border-[#2f5d46]/60'
+      }`}>
+        <input type="checkbox" checked={allChecked} onChange={toggleAll} className="size-5 shrink-0 cursor-pointer rounded accent-[#2f5d46]" />
+        <span>I agree to all of the below</span>
       </label>
 
-      <div className="space-y-3 pt-1 border-t border-slate-700/60">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex items-center gap-1.5 text-xs font-semibold text-[#2f5d46] hover:text-[#1d3d2d] cursor-pointer"
+      >
+        {open ? 'Hide details' : 'Review each item'}
+        <ChevronDown aria-hidden="true" className={`size-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      <AnimatePresence initial={false}>
+      {open && (
+      <motion.div
+        initial={{ height: 0, opacity: 0 }}
+        animate={{ height: 'auto', opacity: 1 }}
+        exit={{ height: 0, opacity: 0 }}
+        transition={{ duration: 0.2 }}
+        className="overflow-hidden"
+      >
+      <div className="space-y-3 border-t border-[#ebf0ec] pt-3">
         {ITEMS.map(({ key, required, text }) => (
-          <label key={key} className="flex items-start gap-3 text-xs text-slate-200 leading-relaxed cursor-pointer hover:text-white transition-colors">
-            <input type="checkbox" checked={choices[key]} onChange={() => toggle(key)}
-              className="mt-0.5 w-4 h-4 rounded border-slate-600 accent-amber-500 cursor-pointer flex-shrink-0" />
-            <span>{text}{required && <b className="text-amber-400"> (required)</b>}</span>
+          <label key={key} className="flex cursor-pointer items-start gap-3 text-xs leading-relaxed text-[#4f5f54] transition-colors hover:text-[#1a2a20]">
+            <input type="checkbox" checked={choices[key]} onChange={() => toggle(key)} className={checkbox} />
+            <span>
+              {text}
+              {required && (
+                <span className="ml-1.5 rounded-full bg-[#fbeee0] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#a3602c]">Required</span>
+              )}
+            </span>
           </label>
         ))}
       </div>
 
+      </motion.div>
+      )}
+      </AnimatePresence>
+
       {minor && (staff ? (
-        <label className="flex items-start gap-3 text-xs text-slate-200 leading-relaxed cursor-pointer border-t border-slate-700 pt-3">
-          <input type="checkbox" checked={choices.is_minor_parental_consent} onChange={() => toggle('is_minor_parental_consent')}
-            className="mt-0.5 w-4 h-4 rounded border-slate-600 accent-amber-500 cursor-pointer flex-shrink-0" />
-          <span>This is a child's profile. A parent or guardian is present and gives this consent on the child's behalf. <b className="text-amber-400">(required)</b></span>
+        <label className="flex cursor-pointer items-start gap-3 border-t border-[#ebf0ec] pt-3 text-xs leading-relaxed text-[#4f5f54]">
+          <input type="checkbox" checked={choices.is_minor_parental_consent} onChange={() => toggle('is_minor_parental_consent')} className={checkbox} />
+          <span>
+            This is a child's profile. A parent or guardian is present and gives this consent on the child's behalf.
+            <span className="ml-1.5 rounded-full bg-[#fbeee0] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#a3602c]">Required</span>
+          </span>
         </label>
       ) : (
-        <p className="text-xs text-amber-300 border-t border-slate-700 pt-3">
+        <p className="border-t border-[#ebf0ec] pt-3 text-xs font-medium text-[#a3602c]">
           This is a child's profile: a parent or guardian must give consent with the salon staff before photos are taken.
         </p>
       ))}
-      <p className="text-[11px] text-slate-400">You can withdraw consent and delete your photos at any time from your profile.</p>
+      <p className="text-[11px] text-[#7f968a]">You can withdraw consent and delete your photos at any time from your profile.</p>
     </fieldset>
   );
 };

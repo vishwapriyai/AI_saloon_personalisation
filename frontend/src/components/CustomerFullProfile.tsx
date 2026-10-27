@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { RefreshCw, Heart, History, Images, LayoutGrid, Repeat, Trash2, Star, Volume2 } from 'lucide-react';
+import { RefreshCw, Heart, History, Images, LayoutGrid, Repeat, Trash2, Star, Volume2, MapPin } from 'lucide-react';
 import { deleteSavedStyle, getCustomerHistory, getCustomerProfile } from '../api/client';
 import type { CustomerHistory, CustomerProfile } from '../api/client';
-import { CustomerInsights, CustomerSummaryCard } from './CustomerInsights';
+import { CustomerAvatar, CustomerInsights, CustomerTypeBadge } from './CustomerInsights';
 import { ComparisonViewer } from './ComparisonViewer';
 import { ServiceIcon } from './ServiceIcon';
 
@@ -47,32 +47,38 @@ function previousStyles(history: CustomerHistory | null): (RepeatableStyle & { k
 /** Strip of previous / saved styles with a Repeat button (stylist view and returning-customer view). */
 export const PreviousStylesStrip: React.FC<{ history: CustomerHistory | null; onRepeat?: (s: RepeatableStyle) => void; onRemoveSaved?: (savedId: number) => void; limit?: number; narrow?: boolean }> = ({ history, onRepeat, onRemoveSaved, limit, narrow = false }) => {
   const items = previousStyles(history).slice(0, limit);
-  if (!items.length) return <p className="text-xs text-slate-500">No previous styles yet.</p>;
+  const [failed, setFailed] = useState<Record<string, boolean>>({});
+  if (!items.length) return <p className="text-xs text-[#8a9a92]">No previous styles yet.</p>;
   return (
     <div className={`grid grid-cols-2 gap-3 ${narrow ? '' : 'sm:grid-cols-3 lg:grid-cols-4'}`}>
       {items.map((s) => (
-        <div key={s.key} className="bg-slate-900/80 border border-slate-700/60 rounded-2xl overflow-hidden flex flex-col">
-          <div className="relative aspect-[4/5] bg-slate-950">
-            {s.reference_image_url && <img src={s.reference_image_url} alt={s.hairstyle_name || 'Previous style'} className="w-full h-full object-contain" loading="lazy" />}
+        <div key={s.key} className="group flex flex-col overflow-hidden rounded-xl border border-[#dfe7e1] bg-[#ffffff] transition-shadow hover:shadow-md">
+          <div className="relative aspect-[4/5] bg-[#f3f5f3]">
+            {s.reference_image_url && !failed[s.key] ? (
+              <img src={s.reference_image_url} alt={s.hairstyle_name || 'Previous style'} className="h-full w-full object-cover" loading="lazy"
+                onError={() => setFailed((f) => ({ ...f, [s.key]: true }))} />
+            ) : (
+              <span className="flex h-full w-full items-center justify-center text-[10px] text-[#8a9a92]">Photo not available</span>
+            )}
             {s.saved && (
-              <span className="absolute top-2 left-2 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg bg-rose-500 text-slate-950">
-                <Heart className="w-3 h-3 fill-current" /> Saved
+              <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-bold text-[#ffffff]">
+                <Heart className="size-3 fill-current" /> Saved
               </span>
             )}
             {s.saved && onRemoveSaved && s.saved_id && (
-              <button onClick={() => onRemoveSaved(s.saved_id!)} className="absolute top-2 right-2 p-1.5 rounded-lg bg-slate-950/80 text-slate-300 hover:text-white" aria-label="Remove saved style">
-                <Trash2 className="w-3.5 h-3.5" />
+              <button onClick={() => onRemoveSaved(s.saved_id!)} className="absolute right-2 top-2 grid size-7 place-items-center rounded-full bg-[#ffffff]/90 text-[#6c7e73] hover:text-rose-600 cursor-pointer" aria-label="Remove saved style">
+                <Trash2 className="size-3.5" />
               </button>
             )}
           </div>
-          <div className="p-2.5 flex-1 flex flex-col justify-between gap-2">
+          <div className="flex flex-1 flex-col justify-between gap-2 p-2.5">
             <div>
-              <p className="text-xs font-bold text-white leading-snug line-clamp-2">{s.hairstyle_name || 'Hairstyle'}</p>
-              <p className="text-[10px] text-slate-500">{s.date}</p>
+              <p className="line-clamp-2 text-xs font-bold leading-snug text-[#1a2a20]">{s.hairstyle_name || 'Hairstyle'}</p>
+              <p className="text-[10px] text-[#8a9a92]">{s.date}</p>
             </div>
             {onRepeat && (
-              <button onClick={() => onRepeat(s)} className="min-h-[40px] rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold flex items-center justify-center gap-1.5">
-                <Repeat className="w-3.5 h-3.5" /> Repeat Style
+              <button onClick={() => onRepeat(s)} className="flex h-9 items-center justify-center gap-1.5 rounded-lg border border-[#c3d3c9] text-xs font-semibold text-[#2f5d46] transition-colors hover:border-[#2f5d46] hover:bg-[#f2f8f4] cursor-pointer">
+                <Repeat className="size-3.5" /> Repeat style
               </button>
             )}
           </div>
@@ -82,34 +88,101 @@ export const PreviousStylesStrip: React.FC<{ history: CustomerHistory | null; on
   );
 };
 
+/** Profile header: avatar, name, type, a stat strip, then services and branches as chips. */
+export const ProfileCard: React.FC<{ profile: CustomerProfile; compact?: boolean }> = ({ profile: c, compact = false }) => {
+  const stats = [
+    { label: 'Visits', value: String(c.total_visits) },
+    { label: 'Avg spend', value: inr(c.average_spend ?? 0) },
+    { label: 'Total spend', value: inr(c.total_spent ?? 0) },
+    { label: c.branches_visited_count === 1 ? 'Branch' : 'Branches', value: String(c.branches_visited_count ?? 0) },
+  ];
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[#dfe7e1] bg-[#ffffff]">
+      <div className="flex flex-wrap items-center gap-4 p-5">
+        <CustomerAvatar name={c.full_name} url={c.avatar_url} size="lg" />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="truncate text-xl font-bold text-[#1a2a20]">{c.full_name}</h3>
+            <CustomerTypeBadge type={c.customer_type} />
+          </div>
+          <p className="mt-0.5 text-xs text-[#6c7e73]">Customer ID <span className="font-semibold text-[#2f5d46]">{c.customer_code}</span></p>
+        </div>
+      </div>
+
+      <dl className={`grid grid-cols-2 border-t border-[#ebf0ec] ${compact ? '' : 'sm:grid-cols-4'}`}>
+        {stats.map((s, i) => (
+          <div key={s.label} className={`px-5 py-3.5 ${i % 2 ? 'border-l' : ''} ${i >= 2 ? (compact ? 'border-t' : 'border-t sm:border-t-0') : ''} ${i === 2 && !compact ? 'sm:border-l' : ''} border-[#ebf0ec]`}>
+            <dt className="text-[10px] font-semibold uppercase tracking-wider text-[#8a9a92]">{s.label}</dt>
+            <dd className="mt-0.5 text-lg font-bold text-[#1a2a20]">{s.value}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {(!!c.frequent_services?.length || !!c.branches_visited?.length) && (
+        <div className={`flex flex-wrap gap-y-4 border-t border-[#ebf0ec] bg-[#fafcfa] px-5 py-4 ${compact ? 'flex-col' : 'gap-x-10'}`}>
+          {!!c.frequent_services?.length && (
+            <div>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[#8a9a92]">Top services</p>
+              <div className="flex flex-wrap gap-1.5">
+                {c.frequent_services.slice(0, 3).map((s) => (
+                  <span key={s.name} className="inline-flex max-w-full items-center gap-2 rounded-xl bg-[#ffffff] py-1.5 pl-1.5 pr-2 text-xs font-semibold text-[#33483c] ring-1 ring-[#dfe7e1]">
+                    <ServiceIcon name={s.name} size="sm" />
+                    <span className="truncate">{s.name}</span>
+                    <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-[#244a37] px-1.5 text-[10px] font-bold text-[#ffffff]" title={`${s.count} ${s.count === 1 ? 'time' : 'times'}`}>
+                      {s.count}×
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {!!c.branches_visited?.length && (
+            <div>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[#8a9a92]">Branches visited</p>
+              <div className="flex flex-wrap gap-1.5">
+                {c.branches_visited.map((b) => (
+                  <span key={b} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[#ffffff] px-3 text-xs font-medium text-[#33483c] ring-1 ring-[#dfe7e1]">
+                    <MapPin aria-hidden="true" className="size-3.5 text-[#2f5d46]" /> {b}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /** Latest look: Before -> AI preview -> after-cut photo (front / side / back), with clear empty states. */
 export const LatestLookCard: React.FC<{ history: CustomerHistory | null }> = ({ history }) => {
   const look = history?.latest_look;
   const status = !look ? null
-    : look.status === 'COMPLETED' ? { text: 'Haircut completed', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' }
-    : look.status === 'CONFIRMED' ? { text: 'Style chosen — after-cut photo pending', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' }
-    : { text: 'Previews made — no style chosen yet', cls: 'bg-slate-700/60 text-slate-300 border-slate-600' };
+    : look.status === 'COMPLETED' ? { text: 'Haircut completed', cls: 'bg-[#e4eee7] text-[#244a37]' }
+    : look.status === 'CONFIRMED' ? { text: 'Style chosen — after-cut photo pending', cls: 'bg-[#fdf3d7] text-[#7a5a0c]' }
+    : { text: 'Previews made — no style chosen yet', cls: 'bg-[#f1f4f1] text-[#6c7e73]' };
   const aiMissing = look?.ai_failed ? 'AI preview failed — use Generate New Style to retry' : 'No AI preview yet';
   const afterMissing = look?.status === 'COMPLETED' ? 'Not captured' : 'Captured after the haircut';
 
   return (
-    <section className="bg-slate-900/70 border border-slate-700/60 rounded-2xl p-4 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-          <Images className="w-4 h-4 text-amber-400" /> Latest Look: Style Preview & After Cut
-        </h3>
+    <section className="space-y-4 rounded-2xl border border-[#dfe7e1] bg-[#ffffff] p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-bold text-[#1a2a20]">
+            <Images className="size-4 text-[#2f5d46]" /> Your latest look
+          </h3>
+          {look && <p className="mt-0.5 text-xs text-[#6c7e73]">{look.style_name || 'Hairstyle'} · {look.date}</p>}
+        </div>
         {look && status && (
-          <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border ${status.cls}`}>
-            {look.style_name ? `${look.style_name} • ` : ''}{look.date} • {status.text}
-          </span>
+          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${status.cls}`}>{status.text}</span>
         )}
       </div>
       {!history ? (
-        <p className="text-xs text-slate-400 flex items-center gap-2"><RefreshCw className="w-4 h-4 animate-spin" /> Loading...</p>
+        <p className="flex items-center gap-2 text-xs text-[#6c7e73]"><RefreshCw className="size-4 animate-spin" /> Loading…</p>
       ) : look ? (
         <ComparisonViewer {...look.images} missing={{ before: 'No photo', ai: aiMissing, after: afterMissing }} />
       ) : (
-        <p className="text-xs text-slate-500">No photo session yet. Use Generate New Style to take photos and create AI previews.</p>
+        <p className="text-xs text-[#8a9a92]">No photo session yet. Use Generate new style to take photos and create AI previews.</p>
       )}
     </section>
   );
@@ -119,7 +192,7 @@ export const LatestLookCard: React.FC<{ history: CustomerHistory | null }> = ({ 
  * Full customer profile: overview, style history (saved / previous AI styles / previous haircut photos),
  * service history and the before / AI / after gallery.
  */
-export const CustomerFullProfile: React.FC<{ customerId: number; onRepeat?: (s: RepeatableStyle) => void; header?: React.ReactNode; initialTab?: Tab }> = ({ customerId, onRepeat, header, initialTab = 'overview' }) => {
+export const CustomerFullProfile: React.FC<{ customerId: number; onRepeat?: (s: RepeatableStyle) => void; header?: React.ReactNode; initialTab?: Tab; hideProfileCard?: boolean }> = ({ customerId, onRepeat, header, initialTab = 'overview', hideProfileCard = false }) => {
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
   const [history, setHistory] = useState<CustomerHistory | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -154,9 +227,7 @@ export const CustomerFullProfile: React.FC<{ customerId: number; onRepeat?: (s: 
 
   return (
     <div className="space-y-5">
-      <div className="bg-slate-800/80 p-5 sm:p-6 rounded-2xl border border-slate-700/60">
-        <CustomerSummaryCard customer={profile} large />
-      </div>
+      {!hideProfileCard && <ProfileCard profile={profile} />}
       {header}
 
       <div className="flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Profile sections">
