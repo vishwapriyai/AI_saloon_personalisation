@@ -465,7 +465,7 @@ export async function getCapacityAnalytics() {
   return res.json();
 }
 
-export async function recommendOffer(payload: { customer_id: number; service_id: number }) {
+export async function recommendOffer(payload: { customer_id: number; service_id: number; requested_day?: string; requested_hour?: number }) {
   const res = await apiFetch(`${API_BASE}/analytics/recommend-offer`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

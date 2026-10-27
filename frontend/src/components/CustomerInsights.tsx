@@ -5,11 +5,11 @@ import type { CustomerType } from '../api/client';
 import { ServiceChip } from './ServiceIcon';
 
 const TYPE_STYLE: Record<CustomerType, { icon: LucideIcon; cls: string }> = {
-  VIP: { icon: Crown, cls: 'bg-amber-500/20 text-amber-300 border-amber-500/40' },
-  Premium: { icon: Gem, cls: 'bg-purple-500/20 text-purple-300 border-purple-500/40' },
-  Priority: { icon: Star, cls: 'bg-sky-500/20 text-sky-300 border-sky-500/40' },
-  Regular: { icon: User, cls: 'bg-slate-700/60 text-slate-200 border-slate-600' },
-  New: { icon: Sparkles, cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' },
+  VIP: { icon: Crown, cls: 'bg-[#fdf3d7] text-[#7a5a0c] border-[#efdca0]' },
+  Premium: { icon: Gem, cls: 'bg-[#f1eefb] text-[#5b4fa0] border-[#dcd6f2]' },
+  Priority: { icon: Star, cls: 'bg-[#e8f1f7] text-[#2f5f7f] border-[#cfe0ec]' },
+  Regular: { icon: User, cls: 'bg-[#eef3ee] text-[#4f6b5a] border-[#dfe7e1]' },
+  New: { icon: Sparkles, cls: 'bg-[#e4eee7] text-[#244a37] border-[#c3d3c9]' },
 };
 
 const inr = (n: number) => `₹${Math.round(n || 0).toLocaleString('en-IN')}`;
@@ -72,7 +72,7 @@ export const CustomerAvatar: React.FC<{ name: string; url?: string | null; size?
   }, [url]);
 
   return (
-    <div className={`${size === 'lg' ? 'w-20 h-20 text-3xl' : 'w-14 h-14 text-xl'} rounded-2xl overflow-hidden bg-slate-800 border border-amber-500/30 flex-shrink-0 flex items-center justify-center`}>
+    <div className={`${size === 'lg' ? 'w-20 h-20 text-3xl' : 'w-14 h-14 text-xl'} rounded-2xl overflow-hidden bg-[#e4eee7] flex-shrink-0 flex items-center justify-center`}>
       {url && !imgError ? (
         <img
           src={url}
@@ -81,7 +81,7 @@ export const CustomerAvatar: React.FC<{ name: string; url?: string | null; size?
           className="w-full h-full object-cover"
         />
       ) : (
-        <span className="text-amber-400 font-bold">{name[0]?.toUpperCase() || '?'}</span>
+        <span className="text-[#244a37] font-bold">{name[0]?.toUpperCase() || '?'}</span>
       )}
     </div>
   );

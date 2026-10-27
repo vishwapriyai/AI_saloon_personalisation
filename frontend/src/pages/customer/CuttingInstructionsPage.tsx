@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Scissors, Volume2, CheckCircle, Square, AlertTriangle, ShieldCheck, Beaker, Languages, RefreshCw, Camera, Play } from 'lucide-react';
+import { Scissors, Volume2, CheckCircle, Square, AlertTriangle, ShieldCheck, Beaker, RefreshCw, Camera, Play, Check } from 'lucide-react';
 import { getInstructions, getInstructionAudio, getSelectionComparison, generateSelectionViews, confirmHaircut } from '../../api/client';
 import type { InstructionLanguage, PhotoView, SelectionComparison } from '../../api/client';
 import { getSession, isStaff } from '../../auth/session';
@@ -14,6 +14,8 @@ const LANGUAGE_OPTIONS: { code: InstructionLanguage; label: string; speech: stri
 const VIEWS: { key: PhotoView; label: string }[] = [
   { key: 'front', label: 'Front' }, { key: 'side', label: 'Side' }, { key: 'back', label: 'Back' },
 ];
+
+const STEPS = ['Photos', 'Preferences', 'Your look', 'Stylist guide'];
 
 const storedLanguage = (): InstructionLanguage => {
   const v = localStorage.getItem('salon_audio_language');
@@ -35,6 +37,7 @@ export const CuttingInstructionsPage: React.FC = () => {
   const [haircutConfirmed, setHaircutConfirmed] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<PhotoView>('front');
   // Confirming the haircut is a stylist's action: on a customer's own session a stylist signs in for it
   const needsStylist = !isStaff(getSession());
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -204,203 +207,267 @@ export const CuttingInstructionsPage: React.FC = () => {
     return viewsTimedOut ? 'Preview unavailable' : 'Generating...';
   };
 
+  const doneCount = completedSteps.length;
+  const progress = instructions.length ? Math.round((doneCount / instructions.length) * 100) : 0;
+  const activeImg = viewImage(activeView);
+  const activeStatus = viewStatus(activeView);
+  const activeError = comparison?.errors?.[activeView];
+  const showGenerate = (comparison && (comparison.before.side || comparison.before.back) && (!comparison.ai.side || !comparison.ai.back)) || viewsTimedOut;
+
   return (
-    <div className="flex-1 flex flex-col space-y-6 py-4">
-      {/* Header Banner */}
-      <div className="bg-slate-800/80 p-5 sm:p-6 rounded-2xl border border-slate-700/60 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div>
-          <span className="text-xs px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 font-semibold border border-amber-500/30">
-            STEP 4 OF 4: STYLIST GUIDE
-          </span>
-          <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight mt-1">Stylist Cutting Instructions</h2>
-          <p className="text-slate-400 text-xs sm:text-sm">Follow these steps for the chosen look.</p>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
-          {/* Language selector */}
-          <div className="flex items-center gap-1 bg-slate-900/80 border border-slate-700 rounded-2xl p-1" role="radiogroup" aria-label="Instruction language">
-            <Languages className="w-4 h-4 text-slate-400 mx-2 flex-shrink-0" />
-            {LANGUAGE_OPTIONS.map((l) => (
-              <button key={l.code} role="radio" aria-checked={language === l.code} onClick={() => setLanguage(l.code)}
-                className={`min-h-[44px] px-3 rounded-xl text-sm font-bold transition-all flex-1 sm:flex-none ${
-                  language === l.code ? 'bg-amber-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800'
-                }`}>
-                {l.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Audio instructions */}
-          <button
-            onClick={handleToggleAudio}
-            disabled={audioLoading}
-            className={`px-5 py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center space-x-2 transition-all shadow-sm touch-target-large active:scale-95 disabled:opacity-70 ${
-              isPlayingAudio
-                ? 'bg-rose-500 text-slate-950'
-                : 'bg-amber-500 hover:bg-amber-600 text-slate-950'
-            }`}
-          >
-            {audioLoading ? <RefreshCw className="w-5 h-5 animate-spin" /> : isPlayingAudio ? <Square className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
-            <span>{audioLoading ? 'Preparing Audio...' : isPlayingAudio ? 'Stop Audio' : 'Play Instructions'}</span>
-            <Volume2 className="w-4 h-4 opacity-70" />
-          </button>
-        </div>
-      </div>
-
-      <p className="text-xs text-slate-400 -mt-3 px-1 flex items-center gap-1.5">
-        <Volume2 className="w-3.5 h-3.5 text-amber-400" /> Language: <b className="text-slate-200">{languageName}</b> — the same steps are read aloud in this language.
-      </p>
-
-      {audioNote && (
-        <div className="bg-slate-800/60 border border-slate-700 px-4 py-3 rounded-2xl text-xs text-slate-300">{audioNote}</div>
-      )}
-
-      {selectedStyle?.feasibility_warning && (
-        <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl flex items-center space-x-3 text-amber-300 text-xs sm:text-sm">
-          <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0" />
-          <div>
-            <span className="font-bold block">Physical Hair Feasibility Advisory:</span>
-            <span>{selectedStyle.feasibility_warning}</span>
-          </div>
-        </div>
-      )}
-
-      {selectedStyle?.chemical_addon && (
-        <div className="bg-indigo-500/10 border border-indigo-500/30 p-4 rounded-2xl space-y-2 text-indigo-200 text-xs sm:text-sm">
-          <div className="flex items-center space-x-2 text-indigo-400 font-bold">
-            <Beaker className="w-5 h-5" />
-            <span>Chemical Service Formula Required: {selectedStyle.chemical_addon.service_name}</span>
-          </div>
-          <p className="text-slate-300">{selectedStyle.chemical_addon.chemical_formula}</p>
-        </div>
-      )}
-
-      {/* AI preview of the confirmed style: front, side, back */}
-      <div className="bg-slate-800/60 border border-slate-700/60 p-5 rounded-2xl space-y-4">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <div>
-            <h3 className="font-bold text-white text-base">{selectedStyle?.name || 'Personalized Hairstyle'} — AI Preview</h3>
-            <p className="text-xs text-slate-400 mt-0.5">{selectedStyle?.category || 'Trendy'} • Maintenance: {selectedStyle?.maintenance_level || 'Medium'}</p>
-          </div>
-          <span className="text-[11px] text-slate-500">Generated on the customer's own photos</span>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          {VIEWS.map(({ key, label }) => {
-            const img = viewImage(key);
-            const status = viewStatus(key);
-            const hasError = comparison?.errors?.[key];
-            return (
-              <div key={key}>
-                <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wide block mb-1">{label}</span>
-                <div className="rounded-2xl overflow-hidden aspect-[4/5] bg-slate-950 border border-slate-700 flex flex-col items-center justify-center p-2 text-center">
-                  {img ? (
-                    <img src={img} alt={`${label} AI preview`} className="w-full h-full object-contain" />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <RefreshCw className={`w-5 h-5 ${status === 'Generating...' ? 'animate-spin text-amber-400' : 'text-slate-500'}`} />
-                      <span className="text-[11px] text-slate-300 font-semibold">{hasError ? 'Preview Failed' : status}</span>
-                      {hasError && <p className="text-[9px] text-slate-400 line-clamp-2">{hasError}</p>}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        {((comparison && (comparison.before.side || comparison.before.back) && (!comparison.ai.side || !comparison.ai.back)) || viewsTimedOut) && (
-          <div className="flex justify-end pt-1">
-            <button
-              type="button"
-              onClick={handleGenerateViews}
-              disabled={generatingViews}
-              className="min-h-[40px] px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold flex items-center gap-2 shadow-sm transition-all"
-            >
-              <RefreshCw className={`w-4 h-4 ${generatingViews ? 'animate-spin' : ''}`} />
-              {generatingViews ? 'Generating Side & Back Previews...' : 'Generate Side & Back Previews'}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Step-by-Step Instructions List & Consultation Sign-off */}
-      <div className="bg-slate-800/60 border border-slate-700/60 p-6 rounded-2xl flex flex-col justify-between space-y-6">
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-2">
-              <Scissors className="w-5 h-5 text-amber-400" />
-              <h3 className="font-bold text-white text-lg">Execution Steps</h3>
-              {stepsLoading && <RefreshCw className="w-4 h-4 animate-spin text-slate-400" />}
+    <div className="auth-rise flex-1 py-2 sm:py-4">
+      <div className="w-full overflow-clip rounded-3xl border border-[#dfe7e1] bg-[#ffffff] shadow-[0_24px_60px_-30px_rgba(36,74,55,0.35)]">
+        {/* Header band */}
+        <div className="relative overflow-hidden bg-gradient-to-r from-[#1d3d2d] via-[#244a37] to-[#2b5740] px-5 py-5 sm:px-7">
+          <div className="pointer-events-none absolute -right-12 -top-16 size-56 rounded-full bg-[#e9b949]/15 blur-3xl" />
+          <div className="relative flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#f3d27a]">Step 4 of 4</p>
+              <h2 className="mt-1 text-2xl font-bold leading-tight tracking-tight text-[#ffffff]">Stylist guide</h2>
+              <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-[#ffffff]/75">
+                {selectedStyle?.name || 'Personalized hairstyle'} · {selectedStyle?.category || 'Trendy'} · Maintenance: {selectedStyle?.maintenance_level || 'Medium'}
+              </p>
             </div>
-            <span className="text-xs text-slate-400">
-              {completedSteps.length} of {instructions.length} completed
-            </span>
+            <div className="hidden shrink-0 rounded-2xl bg-[#ffffff]/10 px-4 py-2.5 text-right ring-1 ring-[#ffffff]/10 sm:block">
+              <p className="text-sm font-semibold text-[#ffffff]">{doneCount} of {instructions.length} steps</p>
+              <p className="mt-0.5 text-xs text-[#ffffff]/65">{haircutConfirmed ? 'Haircut confirmed' : 'Not confirmed yet'}</p>
+            </div>
           </div>
 
-          <div className="space-y-3">
-            {instructions.map((step: string, idx: number) => {
-              const isDone = completedSteps.includes(idx);
-              return (
-                <div
-                  key={idx}
-                  onClick={() => toggleStep(idx)}
-                  className={`p-4 rounded-2xl border transition-all cursor-pointer flex items-start space-x-3 ${
-                    isDone
-                      ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200 opacity-80'
-                      : 'bg-slate-900/80 border-slate-700/80 hover:border-amber-500/50 text-slate-200'
+          <ol aria-label="Progress, step 4 of 4" className="relative mt-4 hidden items-center gap-2 sm:flex">
+            {STEPS.map((label, i) => (
+              <React.Fragment key={label}>
+                <li className="flex items-center gap-2" aria-current={i === 3 ? 'step' : undefined}>
+                  <span className={`grid size-6 place-items-center rounded-full text-[11px] font-bold ${
+                    i === 3 ? 'bg-[#f3d27a] text-[#1d3d2d]' : 'bg-[#ffffff]/90 text-[#1d3d2d]'
+                  }`}>
+                    {i < 3 ? <Check aria-hidden="true" className="size-3.5" /> : i + 1}
+                  </span>
+                  <span className={`text-xs ${i === 3 ? 'font-semibold text-[#ffffff]' : 'text-[#ffffff]/85'}`}>{label}</span>
+                </li>
+                {i < STEPS.length - 1 && <span className="h-px min-w-3 flex-1 bg-[#ffffff]/50" />}
+              </React.Fragment>
+            ))}
+          </ol>
+        </div>
+
+        <div className="grid items-start gap-6 p-4 sm:p-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+          {/* LEFT: AI preview, front / side / back */}
+          <div className="flex flex-col gap-3 lg:sticky lg:top-24">
+            <div className="relative mx-auto aspect-[4/5] h-[min(30rem,calc(100vh-19rem))] min-h-[18rem] max-w-full overflow-hidden rounded-xl border border-[#dfe7e1] bg-[#f1f4f1]">
+              {activeImg ? (
+                <img src={activeImg} alt={`${activeView} AI preview`} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full flex-col items-center justify-center gap-2.5 p-4 text-center">
+                  <RefreshCw aria-hidden="true" className={`size-7 ${activeStatus === 'Generating...' ? 'animate-spin text-[#c9971f]' : 'text-[#a3b3a9]'}`} />
+                  <p className="text-sm font-semibold text-[#33483c]">{activeError ? 'Preview failed' : activeStatus}</p>
+                  {activeError && <p className="line-clamp-3 max-w-xs text-xs text-[#6c7e73]">{activeError}</p>}
+                </div>
+              )}
+              <span className="absolute left-3 top-3 rounded-full bg-[#ffffff]/90 px-3 py-1 text-xs font-bold capitalize text-[#244a37] shadow-sm backdrop-blur">
+                {activeView} · AI preview
+              </span>
+            </div>
+
+            <div role="tablist" aria-label="Preview views" className="grid grid-cols-3 gap-2">
+              {VIEWS.map(({ key, label }) => {
+                const img = viewImage(key);
+                const selected = key === activeView;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    onClick={() => setActiveView(key)}
+                    className={`flex items-center gap-2 rounded-xl border p-1.5 text-left transition-all cursor-pointer ${
+                      selected ? 'border-[#2f5d46] bg-[#f2f8f4] shadow-sm' : 'border-[#dfe7e1] bg-[#ffffff] hover:border-[#c3d3c9]'
+                    }`}
+                  >
+                    <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-lg bg-[#eef3ee]">
+                      {img
+                        ? <img src={img} alt="" className="h-full w-full object-cover" />
+                        : <RefreshCw aria-hidden="true" className={`size-4 ${viewStatus(key) === 'Generating...' ? 'animate-spin text-[#c9971f]' : 'text-[#a3b3a9]'}`} />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-xs font-semibold text-[#1a2a20]">{label}</span>
+                      <span className="block truncate text-[10px] text-[#7f968a]">{img ? 'Ready' : viewStatus(key)}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {showGenerate && (
+              <button
+                type="button"
+                onClick={handleGenerateViews}
+                disabled={generatingViews}
+                className="flex h-10 items-center justify-center gap-2 rounded-xl border border-[#c3d3c9] bg-[#ffffff] text-xs font-semibold text-[#2f5d46] transition-all hover:border-[#2f5d46] hover:bg-[#f6faf7] disabled:opacity-70 cursor-pointer"
+              >
+                <RefreshCw aria-hidden="true" className={`size-4 ${generatingViews ? 'animate-spin' : ''}`} />
+                {generatingViews ? 'Generating side & back previews…' : 'Generate side & back previews'}
+              </button>
+            )}
+            <p className="text-center text-[11px] text-[#8a9a92]">Generated on the customer's own photos</p>
+          </div>
+
+          {/* RIGHT: audio, advisories, steps, confirm */}
+          <div className="flex min-w-0 flex-col gap-5">
+            {/* Listen: compact audio player */}
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[#dfe7e1] bg-[#ffffff] p-3 sm:flex-nowrap">
+                <button
+                  onClick={handleToggleAudio}
+                  disabled={audioLoading}
+                  aria-label={isPlayingAudio ? 'Stop audio' : `Play steps in ${languageName}`}
+                  className={`grid size-12 shrink-0 place-items-center rounded-full text-[#ffffff] shadow-md transition-all active:scale-95 disabled:opacity-70 cursor-pointer ${
+                    isPlayingAudio ? 'bg-rose-600 shadow-rose-600/25 hover:bg-rose-700' : 'bg-gradient-to-br from-[#244a37] to-[#2f5d46] shadow-[#244a37]/25 hover:from-[#1b392b]'
                   }`}
                 >
-                  <div className={`w-7 h-7 rounded-xl font-bold flex items-center justify-center text-xs flex-shrink-0 mt-0.5 ${
-                    isDone ? 'bg-emerald-500 text-slate-950' : 'bg-amber-500/10 text-amber-400'
-                  }`}>
-                    {isDone ? <CheckCircle className="w-4 h-4" /> : idx + 1}
-                  </div>
-                  <p className={`text-sm font-medium leading-relaxed ${isDone ? 'line-through text-slate-400' : 'text-slate-200'}`}>
-                    {step.replace(/^\d+\.\s*/, '')}
+                  {audioLoading
+                    ? <RefreshCw aria-hidden="true" className="size-5 animate-spin" />
+                    : isPlayingAudio
+                      ? <Square aria-hidden="true" className="size-4 fill-current" />
+                      : <Play aria-hidden="true" className="ml-0.5 size-5 fill-current" />}
+                </button>
+
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-[#1a2a20]">
+                    {audioLoading ? 'Preparing audio…' : isPlayingAudio ? 'Playing the steps' : 'Listen to the steps'}
+                  </p>
+                  <p className="flex items-center gap-1.5 text-xs text-[#6c7e73]">
+                    {isPlayingAudio ? (
+                      <span aria-hidden="true" className="flex h-3 items-end gap-0.5">
+                        {[0, 1, 2, 3].map((i) => (
+                          <span key={i} className="w-0.5 animate-pulse rounded-full bg-[#2f5d46]" style={{ height: `${[6, 12, 8, 10][i]}px`, animationDelay: `${i * 150}ms` }} />
+                        ))}
+                      </span>
+                    ) : (
+                      <Volume2 aria-hidden="true" className="size-3.5" />
+                    )}
+                    Read aloud in {languageName}
                   </p>
                 </div>
-              );
-            })}
-          </div>
-        </div>
 
-        <div className="space-y-3 pt-4 border-t border-slate-700/60">
-          {!haircutConfirmed && selectionId ? (
-            <>
-              <div className="flex items-center space-x-2">
-                <ShieldCheck className="w-5 h-5 text-emerald-400" />
-                <span className="text-sm font-bold text-white">Confirm Haircut</span>
+                <div role="radiogroup" aria-label="Instruction language" className="flex shrink-0 items-center gap-0.5 rounded-full bg-[#eef3ee] p-1">
+                  {LANGUAGE_OPTIONS.map((l) => {
+                    const on = language === l.code;
+                    return (
+                      <button
+                        key={l.code}
+                        role="radio"
+                        aria-checked={on}
+                        onClick={() => setLanguage(l.code)}
+                        className={`h-8 rounded-full px-3 text-xs font-semibold transition-all cursor-pointer ${
+                          on ? 'bg-[#ffffff] text-[#1a2a20] shadow-sm' : 'text-[#4f6b5a] hover:text-[#1a2a20]'
+                        }`}
+                      >
+                        {l.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              <p className="text-xs text-slate-400">Stylist and customer agree on this look and these steps. Confirm to start the service.</p>
-              {confirmError && <p role="alert" className="text-xs text-rose-300">{confirmError}</p>}
-              {needsStylist ? (
-                <StaffApproval action="confirm the haircut and start the service" onApproved={(token) => handleConfirmHaircut(token)} />
+              {audioNote && <p className="px-1 text-[11px] text-[#a3602c]">{audioNote}</p>}
+            </div>
+
+            {selectedStyle?.feasibility_warning && (
+              <div className="flex items-start gap-3 rounded-2xl border border-[#e9d9a8] bg-[#fdf8e8] p-4">
+                <AlertTriangle aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-[#a3602c]" />
+                <div className="space-y-0.5 text-xs">
+                  <p className="font-bold text-[#4d3f0f]">Hair feasibility advisory</p>
+                  <p className="leading-relaxed text-[#6b5a22]">{selectedStyle.feasibility_warning}</p>
+                </div>
+              </div>
+            )}
+
+            {selectedStyle?.chemical_addon && (
+              <div className="flex items-start gap-3 rounded-2xl border border-[#d9d4ee] bg-[#f5f3fc] p-4">
+                <Beaker aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-[#5b4fa0]" />
+                <div className="space-y-0.5 text-xs">
+                  <p className="font-bold text-[#3d3470]">Chemical service: {selectedStyle.chemical_addon.service_name}</p>
+                  <p className="leading-relaxed text-[#5a5480]">{selectedStyle.chemical_addon.chemical_formula}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Steps */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="flex items-center gap-2 text-sm font-bold text-[#1a2a20]">
+                  <Scissors aria-hidden="true" className="size-4 text-[#2f5d46]" /> Cutting steps
+                  {stepsLoading && <RefreshCw aria-hidden="true" className="size-3.5 animate-spin text-[#7f968a]" />}
+                </h3>
+                <span className="text-xs font-semibold text-[#6c7e73]">{doneCount} of {instructions.length} done</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-[#e4eee7]">
+                <div className="h-full rounded-full bg-gradient-to-r from-[#244a37] to-[#3a6b52] transition-all duration-500" style={{ width: `${progress}%` }} />
+              </div>
+
+              <ol className="divide-y divide-[#ebf0ec] overflow-hidden rounded-2xl border border-[#dfe7e1] bg-[#ffffff]">
+                {instructions.map((step: string, idx: number) => {
+                  const isDone = completedSteps.includes(idx);
+                  return (
+                    <li key={idx}>
+                      <label className="flex cursor-pointer items-start gap-3.5 px-4 py-3.5 transition-colors hover:bg-[#f6faf7]">
+                        <input
+                          type="checkbox"
+                          checked={isDone}
+                          onChange={() => toggleStep(idx)}
+                          className="mt-0.5 size-[18px] shrink-0 cursor-pointer rounded accent-[#2f5d46]"
+                        />
+                        <span className={`flex-1 text-sm leading-relaxed ${isDone ? 'text-[#8a9a92]' : 'text-[#1a2a20]'}`}>
+                          {step.replace(/^\d+\.\s*/, '')}
+                        </span>
+                        <span className="pt-0.5 text-[11px] font-semibold text-[#a3b3a9]">{idx + 1}</span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+
+            {/* Confirm / after the haircut */}
+            <div className="space-y-3 rounded-2xl border border-[#dfe7e1] bg-[#fafcfa] p-4">
+              {!haircutConfirmed && selectionId ? (
+                <>
+                  <p className="flex items-center gap-2 text-sm font-bold text-[#1a2a20]">
+                    <ShieldCheck aria-hidden="true" className="size-4 text-[#2f5d46]" /> Confirm haircut
+                  </p>
+                  <p className="text-xs text-[#6c7e73]">Stylist and customer agree on this look and these steps. Confirm to start the service.</p>
+                  {confirmError && <p role="alert" className="text-xs text-rose-700">{confirmError}</p>}
+                  {needsStylist ? (
+                    <StaffApproval action="confirm the haircut and start the service" onApproved={(token) => handleConfirmHaircut(token)} />
+                  ) : (
+                    <button
+                      onClick={() => handleConfirmHaircut()}
+                      disabled={confirming}
+                      className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#244a37] to-[#2f5d46] text-sm font-semibold text-[#ffffff] shadow-lg shadow-[#244a37]/25 transition-all hover:from-[#1b392b] hover:to-[#244a37] active:scale-[0.98] disabled:opacity-60 cursor-pointer"
+                    >
+                      {confirming ? <RefreshCw className="size-4 animate-spin" /> : <CheckCircle className="size-4" />}
+                      <span>Confirm haircut &amp; start service</span>
+                    </button>
+                  )}
+                </>
               ) : (
-                <button
-                  onClick={() => handleConfirmHaircut()}
-                  disabled={confirming}
-                  className="w-full font-bold py-4 rounded-2xl text-base shadow-sm active:scale-95 transition-all flex items-center justify-center space-x-2 touch-target-large bg-emerald-600 hover:bg-emerald-700 text-slate-950 disabled:opacity-60"
-                >
-                  {confirming ? <RefreshCw className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
-                  <span>Confirm Haircut & Start Service</span>
-                </button>
+                <>
+                  <p className="flex items-center gap-2 text-sm font-bold text-[#1a2a20]">
+                    <CheckCircle aria-hidden="true" className="size-4 text-[#2f5d46]" />
+                    {selectionId ? 'Haircut confirmed — after the haircut' : 'After the haircut'}
+                  </p>
+                  <p className="text-xs text-[#6c7e73]">Capture the finished look (front, side, back) to compare it with the before photos and the AI preview.</p>
+                  <button
+                    onClick={() => { stopAudio(); navigate('/customer/confirmation'); }}
+                    className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#c9971f] text-sm font-semibold text-[#ffffff] shadow-lg shadow-[#c9971f]/25 transition-all hover:bg-[#b3851a] active:scale-[0.98] cursor-pointer"
+                  >
+                    <Camera aria-hidden="true" className="size-4" />
+                    <span>Haircut done — capture after photos</span>
+                  </button>
+                </>
               )}
-            </>
-          ) : (
-            <>
-              <div className="flex items-center space-x-2">
-                <CheckCircle className="w-5 h-5 text-emerald-400" />
-                <span className="text-sm font-bold text-white">{selectionId ? 'Haircut confirmed — after the haircut' : 'After the haircut'}</span>
-              </div>
-              <p className="text-xs text-slate-400">Capture the finished look (front, side, back) to compare it with the before photos and the AI preview.</p>
-              <button
-                onClick={() => { stopAudio(); navigate('/customer/confirmation'); }}
-                className="w-full font-bold py-4 rounded-2xl text-base shadow-sm active:scale-95 transition-all flex items-center justify-center space-x-2 touch-target-large bg-amber-500 hover:bg-amber-600 text-slate-950"
-              >
-                <Camera className="w-5 h-5" />
-                <span>Haircut Completed — Capture Post-Service Photos</span>
-              </button>
-            </>
-          )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

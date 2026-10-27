@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, ArrowRight, RefreshCw, ImageOff, Sparkles, Heart, AlertTriangle } from 'lucide-react';
+import { Check, ArrowRight, RefreshCw, ImageOff, Sparkles, Heart, AlertTriangle, Info } from 'lucide-react';
 import { saveSelection, generateStyleImages, generateSelectionViews, saveFavouriteStyle } from '../../api/client';
 import { currentCustomerId } from '../../auth/session';
 
 /** Most looks the recommendation returns (backend STYLE_RECOMMENDATION_COUNT). */
 const MAX_LOOKS = 8;
+
+const STEPS = ['Photos', 'Preferences', 'Your look', 'Stylist guide'];
 
 const SERVICE_LABELS: Record<string, string> = { Beard: 'Beard', Colour: 'Colour', Texture: 'Smoothening / Perm' };
 
@@ -145,174 +147,233 @@ export const RecommendationsPage: React.FC = () => {
   // Only looks the customer's hair can have today are shown (older saved results may still contain others)
   const shownStyles = styles.filter((s) => s.feasible !== false);
 
-  return (
-    <div className="flex-1 flex flex-col space-y-6 py-4">
-      {/* Page Title */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-800/80 p-5 rounded-2xl border border-slate-700/60">
-        <div>
-          <span className="text-xs px-3 py-1 rounded-full bg-amber-500/20 text-amber-400 font-semibold border border-amber-500/30">
-            STEP 3 OF 4: CHOOSE YOUR LOOK
-          </span>
-          <h2 className="text-2xl sm:text-3xl font-bold text-white tracking-tight mt-1">
-            Your Top {shownStyles.length} {shownStyles.length === 1 ? 'Look' : 'Looks'}
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-400">Your own photo with each recommended hairstyle. Tap to preview & select.</p>
-          {shownStyles.length > 0 && shownStyles.length < MAX_LOOKS && (
-            <p className="text-xs sm:text-sm text-amber-300 mt-1">
-              Based on your hair length and facial features, these {shownStyles.length} styles are the ones we can create for you today.
-            </p>
-          )}
-          <p className="text-[11px] text-slate-500 mt-1">
-            Previews are AI illustrations to help you choose. The real result depends on your hair and is agreed with your stylist; it is not a guarantee.
-          </p>
-        </div>
+  const readyCount = shownStyles.filter((s) => s.generated_image_url).length;
+  const creatingCount = shownStyles.filter((s) => retrying[s.style_id]).length;
+  const chosen = shownStyles.find((s) => s.style_id === selectedStyleId);
+  const chosenIdx = shownStyles.findIndex((s) => s.style_id === selectedStyleId);
+  const canConfirm = !!chosen?.generated_image_url;
+  const saveState = chosen ? saved[chosen.style_id] : undefined;
 
+  /** Image area of a look in every state; `big` is the main preview, otherwise a thumbnail. */
+  const preview = (style: any, big: boolean) => {
+    if (style.generated_image_url) {
+      return (
+        <img
+          src={style.generated_image_url}
+          alt={`You with ${style.name}`}
+          loading={big ? 'eager' : 'lazy'}
+          className={`h-full w-full object-cover ${big ? 'object-center' : 'object-top'}`}
+        />
+      );
+    }
+    if (style.feasible === false && !retrying[style.style_id]) {
+      return (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-[#fdf8e8] p-3 text-center">
+          <AlertTriangle aria-hidden="true" className={big ? 'size-9 text-[#a3602c]' : 'size-5 text-[#a3602c]'} />
+          <p className={`font-semibold text-[#6b4a1c] ${big ? 'text-sm' : 'text-[10px]'}`}>Not suitable today</p>
+          {big && <p className="max-w-xs text-xs text-[#6b5a22]">{style.feasibility_warning}</p>}
+          {big && style.suggested_alternative && (
+            <p className="text-xs text-[#2f5d46]">Try instead: <b>{style.suggested_alternative.name}</b></p>
+          )}
+        </div>
+      );
+    }
+    if (retrying[style.style_id]) {
+      return (
+        <div className="relative flex h-full w-full flex-col items-center justify-center gap-2 p-3 text-center">
+          <div aria-hidden="true" className="absolute inset-0 animate-pulse bg-gradient-to-b from-[#eef3ee] via-[#e4eee7] to-[#eef3ee]" />
+          <span className={`relative grid place-items-center rounded-full bg-[#ffffff] shadow-sm ${big ? 'size-16' : 'size-9'}`}>
+            <Sparkles aria-hidden="true" className={`animate-pulse text-[#c9971f] ${big ? 'size-7' : 'size-4'}`} />
+          </span>
+          <p className={`relative font-semibold text-[#1a2a20] ${big ? 'text-sm' : 'text-[10px]'}`}>Creating…</p>
+          {big && <p className="relative text-xs text-[#6c7e73]">This can take up to a couple of minutes.</p>}
+        </div>
+      );
+    }
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-2 p-3 text-center">
+        <ImageOff aria-hidden="true" className={big ? 'size-9 text-[#a3b3a9]' : 'size-5 text-[#a3b3a9]'} />
+        <p className={`font-semibold text-[#33483c] ${big ? 'text-sm' : 'text-[10px]'}`}>Preview unavailable</p>
+        {big && style.generation_error && <p className="line-clamp-3 max-w-xs text-xs text-[#6c7e73]">{style.generation_error}</p>}
         <button
-          onClick={handleConfirmSelection}
-          disabled={!selectedStyleId || !styles.find((s) => s.style_id === selectedStyleId)?.generated_image_url}
-          title="Select a look whose preview is ready"
-          className="disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-6 py-3.5 rounded-2xl text-base shadow-sm active:scale-95 transition-all flex items-center justify-center space-x-2 touch-target-large"
+          type="button"
+          onClick={(e) => { e.stopPropagation(); handleRetry(style.style_id); }}
+          className={`flex items-center gap-1.5 rounded-full bg-[#244a37] font-semibold text-[#ffffff] hover:bg-[#1b392b] cursor-pointer ${big ? 'h-10 px-4 text-sm' : 'h-7 px-2.5 text-[10px]'}`}
         >
-          <span>Confirm Selection</span>
-          <ArrowRight className="w-5 h-5" />
+          <RefreshCw aria-hidden="true" className={big ? 'size-4' : 'size-3'} />
+          {style.generation_status === 'NOT_GENERATED' ? 'Create' : 'Retry'}
         </button>
       </div>
+    );
+  };
 
-      {/* Recommended styles: responsive touch grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
-        {shownStyles.map((style, idx) => {
-          const isSelected = selectedStyleId === style.style_id;
-          return (
-            <div
-              key={style.style_id}
-              onClick={() => setSelectedStyleId(style.style_id)}
-              className={`group relative bg-slate-800/60 border rounded-2xl overflow-hidden cursor-pointer transition-all duration-200 flex flex-col justify-between touch-target-large active:scale-[0.98] ${
-                isSelected
-                  ? 'border-amber-500 ring-2 ring-amber-500/40 shadow-sm bg-slate-800'
-                  : 'border-slate-700/60 hover:border-slate-500'
-              }`}
-            >
-              {/* Personalized preview: the customer's own edited photo only */}
-              <div className="relative aspect-[4/5] bg-slate-950 overflow-hidden">
-                {style.generated_image_url ? (
-                  <img
-                    src={style.generated_image_url}
-                    alt={`You with ${style.name}`}
-                    loading="lazy"
-                    className="w-full h-full object-contain"
-                  />
-                ) : style.feasible === false && !retrying[style.style_id] ? (
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-3 p-4 text-center bg-amber-500/5">
-                    <AlertTriangle className="w-9 h-9 text-amber-400" />
-                    <p className="text-sm font-semibold text-amber-200">Not suitable today</p>
-                    <p className="text-[11px] text-slate-300 line-clamp-5">{style.feasibility_warning}</p>
-                    {style.suggested_alternative && (
-                      <p className="text-[11px] text-emerald-300">Try instead: <b>{style.suggested_alternative.name}</b></p>
-                    )}
-                    <p className="text-[10px] text-slate-500">No preview is made for a look the current hair cannot support.</p>
-                  </div>
-                ) : retrying[style.style_id] ? (
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-3 p-4 text-center">
-                    <Sparkles className="w-9 h-9 text-amber-400 animate-pulse" />
-                    <p className="text-sm font-semibold text-slate-200">Creating your look...</p>
-                    <p className="text-[11px] text-slate-400">This can take up to a couple of minutes.</p>
-                  </div>
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-3 p-4 text-center">
-                    <ImageOff className="w-9 h-9 text-slate-500" />
-                    <p className="text-sm font-semibold text-slate-200">Preview unavailable</p>
-                    {style.generation_error && (
-                      <p className="text-[11px] text-slate-400 line-clamp-5">{style.generation_error}</p>
-                    )}
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); handleRetry(style.style_id); }}
-                      className="min-h-[44px] px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-sm font-bold flex items-center gap-2"
-                    >
-                      <RefreshCw className="w-4 h-4" />
-                      {style.generation_status === 'NOT_GENERATED' ? 'Create preview' : 'Retry'}
-                    </button>
-                  </div>
-                )}
+  return (
+    <div className="auth-rise flex-1 py-2 sm:py-4">
+      <div className="w-full overflow-clip rounded-3xl border border-[#dfe7e1] bg-[#ffffff] shadow-[0_24px_60px_-30px_rgba(36,74,55,0.35)]">
+        {/* Header band */}
+        <div className="relative overflow-hidden bg-gradient-to-r from-[#1d3d2d] via-[#244a37] to-[#2b5740] px-5 py-5 sm:px-7">
+          <div className="pointer-events-none absolute -right-12 -top-16 size-56 rounded-full bg-[#e9b949]/15 blur-3xl" />
+          <div className="relative flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#f3d27a]">Step 3 of 4</p>
+              <h2 className="mt-1 text-2xl font-bold leading-tight tracking-tight text-[#ffffff]">
+                Your top {shownStyles.length} {shownStyles.length === 1 ? 'look' : 'looks'}
+              </h2>
+              <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-[#ffffff]/75">
+                {shownStyles.length > 0 && shownStyles.length < MAX_LOOKS
+                  ? `Based on your hair length and facial features, these ${shownStyles.length} styles are the ones we can create for you today.`
+                  : 'Your own photo with each recommended style.'}
+              </p>
+            </div>
+            <div className="hidden shrink-0 rounded-2xl bg-[#ffffff]/10 px-4 py-2.5 text-right ring-1 ring-[#ffffff]/10 sm:block">
+              <p className="text-sm font-semibold text-[#ffffff]">{readyCount} of {shownStyles.length} ready</p>
+              <p className="mt-0.5 flex items-center justify-end gap-1.5 text-xs text-[#ffffff]/65">
+                {creatingCount > 0 ? (<><Sparkles aria-hidden="true" className="size-3.5 animate-pulse text-[#f3d27a]" /> Creating {creatingCount}…</>) : 'Previews'}
+              </p>
+            </div>
+          </div>
 
-                <div className="absolute top-2 left-2 bg-slate-950/80 px-2 py-0.5 rounded-lg text-[11px] font-bold text-amber-400 border border-slate-700">
-                  Option #{idx + 1}
-                </div>
+          <ol aria-label="Progress, step 3 of 4" className="relative mt-4 hidden items-center gap-2 sm:flex">
+            {STEPS.map((label, i) => (
+              <React.Fragment key={label}>
+                <li className="flex items-center gap-2" aria-current={i === 2 ? 'step' : undefined}>
+                  <span className={`grid size-6 place-items-center rounded-full text-[11px] font-bold ${
+                    i === 2 ? 'bg-[#f3d27a] text-[#1d3d2d]' : i < 2 ? 'bg-[#ffffff]/90 text-[#1d3d2d]' : 'bg-[#ffffff]/10 text-[#ffffff]/60'
+                  }`}>
+                    {i < 2 ? <Check aria-hidden="true" className="size-3.5" /> : i + 1}
+                  </span>
+                  <span className={`text-xs ${i === 2 ? 'font-semibold text-[#ffffff]' : i < 2 ? 'text-[#ffffff]/85' : 'text-[#ffffff]/60'}`}>{label}</span>
+                </li>
+                {i < STEPS.length - 1 && <span className={`h-px min-w-3 flex-1 ${i < 2 ? 'bg-[#ffffff]/50' : 'bg-[#ffffff]/15'}`} />}
+              </React.Fragment>
+            ))}
+          </ol>
+        </div>
 
-                {isSelected && (
-                  <div className="absolute top-2 right-2 w-7 h-7 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shadow-sm">
-                    <Check className="w-5 h-5 stroke-[3]" />
-                  </div>
-                )}
-
-                {style.generated_image_url && (
+        <div className="grid items-start gap-6 p-4 sm:p-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+          {/* LEFT: selected look, large */}
+          {chosen && (
+            <div className="flex flex-col gap-4 lg:sticky lg:top-24">
+              <div className="relative mx-auto aspect-[4/5] h-[min(34rem,calc(100vh-17rem))] min-h-[20rem] max-w-full overflow-hidden rounded-xl border border-[#dfe7e1] bg-[#f1f4f1]">
+                {preview(chosen, true)}
+                <span className="absolute left-3 top-3 rounded-full bg-[#ffffff]/90 px-3 py-1 text-xs font-bold text-[#244a37] shadow-sm backdrop-blur">
+                  Look {chosenIdx + 1} of {shownStyles.length}
+                </span>
+                {chosen.generated_image_url && (
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); handleSaveStyle(style); }}
-                    disabled={saved[style.style_id] === 'saving' || saved[style.style_id] === 'saved'}
-                    className={`absolute bottom-2 right-2 min-h-[40px] px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm ${
-                      saved[style.style_id] === 'saved' ? 'bg-rose-500 text-slate-950' : 'bg-slate-950/80 text-slate-100 border border-slate-600 hover:border-rose-400'
+                    onClick={() => handleSaveStyle(chosen)}
+                    disabled={saveState === 'saving' || saveState === 'saved'}
+                    className={`absolute right-3 top-3 flex h-9 items-center gap-1.5 rounded-full px-3.5 text-xs font-semibold shadow-md backdrop-blur transition-all cursor-pointer disabled:cursor-default ${
+                      saveState === 'saved' ? 'bg-rose-500 text-[#ffffff]' : 'bg-[#ffffff]/90 text-[#33483c] hover:text-rose-600'
                     }`}
-                    aria-label={`Save ${style.name}`}
                   >
-                    {saved[style.style_id] === 'saving' ? <RefreshCw className="w-4 h-4 animate-spin" />
-                      : <Heart className={`w-4 h-4 ${saved[style.style_id] === 'saved' ? 'fill-current' : ''}`} />}
-                    {saved[style.style_id] === 'saved' ? 'Saved' : saved[style.style_id] === 'error' ? 'Retry Save' : 'Save Style'}
+                    {saveState === 'saving'
+                      ? <RefreshCw aria-hidden="true" className="size-4 animate-spin" />
+                      : <Heart aria-hidden="true" className={`size-4 ${saveState === 'saved' ? 'fill-current' : ''}`} />}
+                    {saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Retry save' : 'Save'}
                   </button>
                 )}
               </div>
 
-              {/* Style Information & Expert Analysis */}
-              <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
-                        {style.category}
-                      </span>
-                      {style.service && style.service !== 'Hair' && (
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-sky-300 px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20">
-                          {SERVICE_LABELS[style.service] || style.service}
-                        </span>
-                      )}
-                    </div>
-                    {(!style.service || style.service === 'Hair') && style.hair_length && (
-                      <span className="text-[11px] text-slate-400 font-medium">{style.hair_length}</span>
-                    )}
-                  </div>
-                  <h3 className="font-bold text-white text-base leading-snug">{style.name}</h3>
-                  {style.feasibility_warning && style.feasible !== false && (
-                    <p className="text-[11px] text-amber-300 mt-1">{style.feasibility_warning}</p>
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="rounded-full bg-[#e4eee7] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#2f5d46]">{chosen.category}</span>
+                  {chosen.service && chosen.service !== 'Hair' && (
+                    <span className="rounded-full bg-[#fdf3d7] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#7a5a0c]">
+                      {SERVICE_LABELS[chosen.service] || chosen.service}
+                    </span>
                   )}
-                  <p className="text-xs text-slate-400 line-clamp-2 mt-1.5 leading-normal">{style.description}</p>
+                  {(!chosen.service || chosen.service === 'Hair') && chosen.hair_length && (
+                    <span className="text-[11px] font-medium text-[#7f968a]">· {chosen.hair_length}</span>
+                  )}
                 </div>
+                <h3 className="text-xl font-bold leading-snug text-[#1a2a20]">{chosen.name}</h3>
+                {chosen.feasibility_warning && chosen.feasible !== false && (
+                  <p className="text-xs text-[#a3602c]">{chosen.feasibility_warning}</p>
+                )}
+                <p className="text-[13px] leading-relaxed text-[#6c7e73]">{chosen.description}</p>
 
-                {/* The stylist's cutting steps and any chemical add-on */}
-                {(style.stylist_instructions || style.chemical_addon?.required) && (
-                  <div className="bg-slate-900/80 rounded-2xl p-2.5 border border-slate-700/60 text-[11px] space-y-1">
-                    {style.stylist_instructions && (
-                      <details onClick={(e) => e.stopPropagation()}>
-                        <summary className="cursor-pointer font-semibold text-slate-300 min-h-[28px] flex items-center">Haircut steps</summary>
-                        <ol className="mt-1 space-y-0.5 list-decimal list-inside text-slate-400">
-                          {String(style.stylist_instructions).split('\n').filter((l: string) => l.trim()).map((l: string, i: number) => (
-                            <li key={i}>{l.replace(/^\d+[.)]\s*/, '')}</li>
-                          ))}
-                        </ol>
-                      </details>
-                    )}
-                    {style.chemical_addon && style.chemical_addon.required && (
-                      <div className="mt-1 pt-1 border-t border-slate-800 text-amber-400 font-semibold flex items-center justify-between">
-                        <span>✨ Add-on: {style.chemical_addon.service_name}</span>
-                        <span>+₹{style.chemical_addon.est_price_addon}</span>
-                      </div>
-                    )}
+                {chosen.chemical_addon && chosen.chemical_addon.required && (
+                  <div className="flex items-center justify-between rounded-xl bg-[#fdf3d7] px-3 py-2 text-xs font-semibold text-[#7a5a0c]">
+                    <span>Add-on: {chosen.chemical_addon.service_name}</span>
+                    <span>+₹{chosen.chemical_addon.est_price_addon}</span>
                   </div>
+                )}
+                {chosen.stylist_instructions && (
+                  <details className="rounded-xl border border-[#ebf0ec] px-3 py-1 text-xs">
+                    <summary className="flex min-h-[32px] cursor-pointer items-center font-semibold text-[#2f5d46]">Haircut steps</summary>
+                    <ol className="mb-2 mt-1 list-inside list-decimal space-y-0.5 text-[#6c7e73]">
+                      {String(chosen.stylist_instructions).split('\n').filter((l: string) => l.trim()).map((l: string, i: number) => (
+                        <li key={i}>{l.replace(/^\d+[.)]\s*/, '')}</li>
+                      ))}
+                    </ol>
+                  </details>
                 )}
               </div>
 
+              <button
+                onClick={handleConfirmSelection}
+                disabled={!canConfirm}
+                title="Select a look whose preview is ready"
+                className={`flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-all ${
+                  canConfirm
+                    ? 'bg-gradient-to-r from-[#244a37] to-[#2f5d46] text-[#ffffff] shadow-lg shadow-[#244a37]/25 hover:from-[#1b392b] hover:to-[#244a37] active:scale-[0.98] cursor-pointer'
+                    : 'cursor-not-allowed border border-[#e4eee7] bg-[#f1f4f1] text-[#a3b3a9]'
+                }`}
+              >
+                {canConfirm ? <>Choose this look <ArrowRight aria-hidden="true" className="size-4" /></> : 'Wait for the preview to be ready'}
+              </button>
             </div>
-          );
-        })}
+          )}
+
+          {/* RIGHT: all looks as thumbnails */}
+          <div className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-[#7f968a]">All looks · tap to view</p>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {shownStyles.map((style, idx) => {
+                const isSelected = selectedStyleId === style.style_id;
+                return (
+                  <div
+                    key={style.style_id}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={isSelected}
+                    onClick={() => setSelectedStyleId(style.style_id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedStyleId(style.style_id); } }}
+                    className="group cursor-pointer focus-visible:outline-none"
+                  >
+                    <div className={`relative aspect-[4/5] overflow-hidden rounded-2xl bg-[#f1f4f1] transition-all group-focus-visible:ring-4 group-focus-visible:ring-[#2f5d46]/25 ${
+                      isSelected ? 'ring-[3px] ring-[#2f5d46] ring-offset-2' : 'ring-1 ring-[#dfe7e1] group-hover:ring-[#c3d3c9]'
+                    }`}>
+                      {preview(style, false)}
+                      <span className="absolute left-1.5 top-1.5 grid size-6 place-items-center rounded-full bg-[#ffffff]/90 text-[10px] font-bold text-[#244a37] shadow-sm">
+                        {idx + 1}
+                      </span>
+                      {isSelected && (
+                        <span className="absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-full bg-[#244a37] text-[#f3d27a] shadow">
+                          <Check aria-hidden="true" className="size-3.5 stroke-[3]" />
+                        </span>
+                      )}
+                      {saved[style.style_id] === 'saved' && (
+                        <span className="absolute bottom-1.5 right-1.5 grid size-6 place-items-center rounded-full bg-rose-500 text-[#ffffff]">
+                          <Heart aria-hidden="true" className="size-3 fill-current" />
+                        </span>
+                      )}
+                    </div>
+                    <p className={`mt-1.5 truncate text-xs font-semibold ${isSelected ? 'text-[#1a2a20]' : 'text-[#4f6b5a]'}`}>{style.name}</p>
+                    <p className="text-[10px] uppercase tracking-wide text-[#8a9a92]">{style.category}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <p className="flex items-start gap-2 rounded-xl bg-[#f6faf7] px-3 py-2.5 text-[11px] leading-relaxed text-[#6c7e73]">
+              <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-[#2f5d46]" />
+              Previews are AI illustrations to help you choose. The real result depends on your hair and is agreed with your stylist; it is not a guarantee.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );

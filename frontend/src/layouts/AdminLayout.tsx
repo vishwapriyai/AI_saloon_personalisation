@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, Users, BarChart3, Tag, Menu, X, LogOut, ChevronRight, UserSearch
+  LayoutDashboard, Users, BarChart3, Tag, Menu, X, LogOut, UserSearch, Scissors
 } from 'lucide-react';
 import { clearSession, getSession } from '../auth/session';
 import { BRAND } from '../config/brand';
@@ -9,7 +9,8 @@ import { BRAND } from '../config/brand';
 export const AdminLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Phones / tablets: a slide-in drawer, closed until the menu button is tapped. Desktop: always shown.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const session = getSession();
   const initials = (session?.name || 'Admin').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 
@@ -19,53 +20,58 @@ export const AdminLayout: React.FC = () => {
   };
 
   const menuItems = [
-    { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
-    { label: 'Customers', path: '/admin/customers', icon: Users },
-    { label: 'Serve a Customer', path: '/stylist/customers', icon: UserSearch },
-    { label: 'Capacity Analytics', path: '/admin/analytics/capacity', icon: BarChart3 },
-    { label: 'Offers & Coupons', path: '/admin/campaigns', icon: Tag },
+    // tone: icon tile colours (idle / active)
+    { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard, tone: 'bg-[#e4eee7] text-[#2f5d46]', on: 'bg-[#2f5d46] text-[#ffffff]' },
+    { label: 'Customers', path: '/admin/customers', icon: Users, tone: 'bg-[#e8f1f7] text-[#2f6f9f]', on: 'bg-[#2f6f9f] text-[#ffffff]' },
+    { label: 'Serve a Customer', path: '/stylist/customers', icon: UserSearch, tone: 'bg-[#f1eefb] text-[#6a55b5]', on: 'bg-[#6a55b5] text-[#ffffff]' },
+    { label: 'Capacity Analytics', path: '/admin/analytics/capacity', icon: BarChart3, tone: 'bg-[#e3f3f1] text-[#23847a]', on: 'bg-[#23847a] text-[#ffffff]' },
+    { label: 'Offers & Coupons', path: '/admin/campaigns', icon: Tag, tone: 'bg-[#fdf3d7] text-[#b07d12]', on: 'bg-[#c9971f] text-[#ffffff]' },
     // Hairstyle catalogue, loyalty & membership and settings pages are not built yet, so they are not listed
   ];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col lg:flex-row font-sans">
+    <div className="flex min-h-screen flex-col bg-[#ffffff] font-sans text-[#1a2a20] lg:flex-row">
       {/* Mobile Topbar */}
-      <header className="lg:hidden bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center space-x-2">
+      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-[#ebf0ec] bg-[#ffffff]/95 px-4 py-3 backdrop-blur-md lg:hidden">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-2 rounded-lg bg-slate-800 text-slate-300"
+            className="grid size-10 place-items-center rounded-xl text-[#33483c] hover:bg-[#eef3ee] cursor-pointer"
+            aria-label={sidebarOpen ? 'Close menu' : 'Open menu'}
           >
-            {sidebarOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            {sidebarOpen ? <X className="size-5" /> : <Menu className="size-5" />}
           </button>
-          <span className="font-bold text-amber-400">{BRAND.name} Admin</span>
+          <span className="text-sm font-bold text-[#1a2a20]">{BRAND.name} Admin</span>
         </div>
-        <button onClick={logout} className="text-xs px-3 py-2 rounded-lg bg-slate-800 hover:bg-rose-500/15 text-slate-300 hover:text-rose-300 flex items-center gap-1.5" aria-label="Log out">
-          <LogOut className="w-4 h-4" />
-          <span>Logout</span>
+        <button onClick={logout} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-[#6c7e73] hover:bg-rose-50 hover:text-rose-700 cursor-pointer" aria-label="Log out">
+          <LogOut className="size-4" /> Logout
         </button>
       </header>
 
+      {/* Backdrop behind the drawer (phones / tablets) */}
+      {sidebarOpen && (
+        <div aria-hidden="true" onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-40 bg-[#0f1f17]/40 backdrop-blur-[1px] lg:hidden" />
+      )}
+
       {/* Sidebar Navigation */}
       <aside
-        className={`${
-          sidebarOpen ? 'block' : 'hidden'
-        } lg:block w-full lg:w-64 bg-slate-900 border-r border-slate-800 flex-shrink-0 flex flex-col justify-between`}
+        className={`fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] shrink-0 flex-col justify-between overflow-y-auto border-r border-[#ebf0ec] bg-[#fafcfa] transition-transform duration-200 lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:w-64 lg:max-w-none lg:translate-x-0 lg:shadow-none ${
+          sidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
+        }`}
       >
         <div>
-          <div className="p-6 border-b border-slate-800 hidden lg:flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center font-bold text-slate-950">
-                AI
-              </div>
-              <div>
-                <h2 className="font-bold text-white leading-tight">SALON AI</h2>
-                <p className="text-xs text-amber-400 font-medium">Control Dashboard</p>
-              </div>
+          <div className="flex items-center gap-3 px-6 py-6">
+            <span className="grid size-10 place-items-center rounded-xl bg-gradient-to-br from-[#244a37] to-[#3a6b52] shadow-md shadow-[#244a37]/25">
+              <Scissors aria-hidden="true" className="size-5 text-[#ffffff]" />
+            </span>
+            <div className="min-w-0 leading-tight">
+              <p className="truncate text-sm font-bold text-[#1a2a20]">{BRAND.name}</p>
+              <p className="text-[11px] font-medium text-[#7f968a]">Admin console</p>
             </div>
           </div>
 
-          <nav className="p-4 space-y-1">
+          <p className="px-6 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#a3b3a9]">Menu</p>
+          <nav className="space-y-1 px-3 pb-4">
             {menuItems.map((item) => {
               const Icon = item.icon;
               const isActive = location.pathname.startsWith(item.path);
@@ -76,17 +82,17 @@ export const AdminLayout: React.FC = () => {
                     navigate(item.path);
                     if (window.innerWidth < 1024) setSidebarOpen(false);
                   }}
-                  className={`w-full flex items-center justify-between px-4 py-3 rounded-xl font-medium text-sm transition-all ${
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`group flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-medium transition-all cursor-pointer ${
                     isActive
-                      ? 'bg-amber-500 text-slate-950 shadow-sm font-semibold'
-                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                      ? 'bg-[#ffffff] font-semibold text-[#1a2a20] shadow-sm ring-1 ring-[#e4eee7]'
+                      : 'text-[#4f6b5a] hover:bg-[#ffffff] hover:text-[#1a2a20]'
                   }`}
                 >
-                  <div className="flex items-center space-x-3">
-                    <Icon className="w-5 h-5" />
-                    <span>{item.label}</span>
-                  </div>
-                  {isActive && <ChevronRight className="w-4 h-4" />}
+                  <span className={`grid size-8 shrink-0 place-items-center rounded-lg transition-colors ${isActive ? `${item.on} shadow-sm` : item.tone}`}>
+                    <Icon aria-hidden="true" className="size-4" />
+                  </span>
+                  <span>{item.label}</span>
                 </button>
               );
             })}
@@ -94,25 +100,24 @@ export const AdminLayout: React.FC = () => {
         </div>
 
         {/* User Info Footer */}
-        <div className="p-4 border-t border-slate-800 flex items-center justify-between bg-slate-900/50">
-          <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-full bg-slate-700 flex items-center justify-center font-bold text-amber-400 text-sm">
+        <div className="m-3 flex items-center justify-between gap-2 rounded-2xl border border-[#ebf0ec] bg-[#ffffff] p-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[#244a37] text-xs font-bold text-[#f3d27a]">
               {initials}
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-white">{session?.name || 'Salon Admin'}</p>
-              <p className="text-[10px] text-slate-400">{session?.role}</p>
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold text-[#1a2a20]">{session?.name || 'Salon Admin'}</p>
+              <p className="truncate text-[10px] text-[#7f968a]">{session?.role}</p>
             </div>
           </div>
-          <button onClick={logout} className="px-2.5 py-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 flex items-center gap-1.5 text-xs font-semibold" aria-label="Log out">
-            <LogOut className="w-4 h-4" />
-            <span>Logout</span>
+          <button onClick={logout} className="grid size-9 shrink-0 place-items-center rounded-lg text-[#7f968a] transition-colors hover:bg-rose-50 hover:text-rose-700 cursor-pointer" aria-label="Log out" title="Log out">
+            <LogOut className="size-4" />
           </button>
         </div>
       </aside>
 
       {/* Admin Content Area */}
-      <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+      <main data-scroll-root className="min-w-0 flex-1 overflow-y-auto bg-[#ffffff] p-4 sm:p-6 lg:p-8">
         <Outlet />
       </main>
     </div>

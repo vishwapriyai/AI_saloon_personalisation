@@ -42,10 +42,10 @@ export const ServiceChip: React.FC<{ name: string; count?: number }> = ({ name, 
   const { icon: Icon, tone, short } = kindOf(name);
   // Same height as the branch pills next to it (h-7), with a small tinted icon instead of a large bubble
   return (
-    <span className="inline-flex items-center gap-1.5 h-7 pl-1 pr-2.5 rounded-lg bg-slate-800/80 border border-slate-700 text-xs text-slate-200" title={name}>
+    <span className="inline-flex items-center gap-1.5 h-7 pl-1 pr-2.5 rounded-full bg-[#ffffff] border border-[#dfe7e1] text-xs text-[#33483c]" title={name}>
       <span className={`w-5 h-5 rounded-md ${tone} flex items-center justify-center flex-shrink-0`}><Icon className="w-3 h-3" /></span>
       <span className="font-semibold">{short}</span>
-      {count ? <span className="text-[10px] text-slate-400">{count}×</span> : null}
+      {count ? <span className="text-[10px] text-[#8a9a92]">{count}×</span> : null}
     </span>
   );
 };
